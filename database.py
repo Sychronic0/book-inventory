@@ -15,6 +15,14 @@ def _migrate_library_schema(connection: sqlite3.Connection) -> None:
     columns = {row["name"] for row in connection.execute("PRAGMA table_info(library)")}
     if "sku" not in columns:
         connection.execute("ALTER TABLE library ADD COLUMN sku TEXT")
+    if "signed" not in columns:
+        connection.execute(
+            "ALTER TABLE library ADD COLUMN signed INTEGER NOT NULL DEFAULT 0"
+        )
+    if "special_edition" not in columns:
+        connection.execute(
+            "ALTER TABLE library ADD COLUMN special_edition INTEGER NOT NULL DEFAULT 0"
+        )
 
 
 def init_db() -> None:
@@ -25,7 +33,9 @@ def init_db() -> None:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 title TEXT NOT NULL COLLATE NOCASE UNIQUE,
                 sku TEXT,
-                quantity INTEGER NOT NULL DEFAULT 1 CHECK (quantity > 0)
+                quantity INTEGER NOT NULL DEFAULT 1 CHECK (quantity > 0),
+                signed INTEGER NOT NULL DEFAULT 0,
+                special_edition INTEGER NOT NULL DEFAULT 0
             );
 
             CREATE TABLE IF NOT EXISTS catalog (

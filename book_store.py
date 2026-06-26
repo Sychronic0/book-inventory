@@ -22,7 +22,7 @@ def load_books() -> list[dict]:
     with get_connection() as connection:
         rows = connection.execute(
             """
-            SELECT id, title, sku, quantity
+            SELECT id, title, sku, quantity, signed, special_edition
             FROM library
             ORDER BY title COLLATE NOCASE
             """
@@ -33,12 +33,20 @@ def load_books() -> list[dict]:
             "title": row["title"],
             "sku": row["sku"] or "",
             "quantity": row["quantity"],
+            "signed": bool(row["signed"]),
+            "special_edition": bool(row["special_edition"]),
         }
         for row in rows
     ]
 
 
-def add_book(title: str, quantity: int = 1, sku: str | None = None) -> None:
+def add_book(
+    title: str,
+    quantity: int = 1,
+    sku: str | None = None,
+    signed: bool = False,
+    special_edition: bool = False,
+) -> None:
     title = title.strip()
     sku = _normalize_sku(sku)
     if not title:
@@ -63,8 +71,11 @@ def add_book(title: str, quantity: int = 1, sku: str | None = None) -> None:
 
         if row is None:
             connection.execute(
-                "INSERT INTO library (title, sku, quantity) VALUES (?, ?, ?)",
-                (title, sku, quantity),
+                """
+                INSERT INTO library (title, sku, quantity, signed, special_edition)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (title, sku, quantity, int(bool(signed)), int(bool(special_edition))),
             )
         else:
             connection.execute(

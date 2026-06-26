@@ -16,6 +16,18 @@ GOLD_LIGHT = "#e8c547"
 INK = "#2a1a12"
 BRASS = "#8b6914"
 
+# Badge palette — soft jewel tones that read on parchment
+SIGNED_FG = "#f5e6c8"        # cream text
+SIGNED_BG = "#5c2a2e"        # burgundy pill
+EDITION_FG = "#2a1a12"       # ink text
+EDITION_BG = "#e8c547"       # gold pill
+BADGES_PLAIN = "—"
+
+# Glyphs used in the edition column (text-only badges inside the tree)
+GLYPH_SIGNED = "✦ Signed"
+GLYPH_SPECIAL = "❖ Special Edition"
+GLYPH_BOTH = "✦ Signed  ❖ Special Edition"
+
 
 class VictorianFrame(tk.Frame):
     """Double-bordered panel with a gold trim and parchment interior."""
@@ -30,8 +42,8 @@ class BookInventoryApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title(APP_TITLE)
-        self.root.geometry("780x680")
-        self.root.minsize(640, 560)
+        self.root.geometry("900x720")
+        self.root.minsize(720, 580)
         self.root.configure(bg=MAHOGANY)
 
         self.title_font = ("Georgia", 22, "bold")
@@ -39,6 +51,11 @@ class BookInventoryApp:
         self.body_font = ("Georgia", 11)
         self.label_font = ("Georgia", 10, "bold")
         self.button_font = ("Georgia", 10, "bold")
+        self.badge_font = ("Georgia", 10, "bold")
+
+        # Tk variables backing the edition checkboxes
+        self.signed_var = tk.BooleanVar(value=False)
+        self.special_var = tk.BooleanVar(value=False)
 
         self._configure_styles()
         self._build_ui()
@@ -56,7 +73,7 @@ class BookInventoryApp:
             bordercolor=GOLD,
             lightcolor=GOLD,
             darkcolor=BURGUNDY,
-            rowheight=28,
+            rowheight=30,
             font=self.body_font,
         )
         style.configure(
@@ -79,6 +96,18 @@ class BookInventoryApp:
             bordercolor=GOLD,
             lightcolor=GOLD,
             padding=6,
+        )
+        style.configure(
+            "Victorian.TCheckbutton",
+            background=PARCHMENT,
+            foreground=INK,
+            font=self.body_font,
+            focuscolor=GOLD,
+        )
+        style.map(
+            "Victorian.TCheckbutton",
+            background=[("active", PARCHMENT)],
+            indicatorcolor=[("selected", BURGUNDY), ("!selected", CREAM)],
         )
 
     def _build_ui(self) -> None:
@@ -135,7 +164,7 @@ class BookInventoryApp:
         list_panel = VictorianFrame(main)
         list_panel.grid(row=3, column=0, sticky=tk.NSEW, pady=(0, 12))
 
-        columns = ("title", "sku", "quantity")
+        columns = ("title", "sku", "quantity", "edition")
         self.tree = ttk.Treeview(
             list_panel.inner,
             columns=columns,
@@ -146,9 +175,37 @@ class BookInventoryApp:
         self.tree.heading("title", text="Volume Title")
         self.tree.heading("sku", text="SKU")
         self.tree.heading("quantity", text="Copies")
-        self.tree.column("title", width=320, anchor=tk.W)
+        self.tree.heading("edition", text="Edition")
+        self.tree.column("title", width=300, anchor=tk.W)
         self.tree.column("sku", width=140, anchor=tk.W)
-        self.tree.column("quantity", width=80, anchor=tk.CENTER)
+        self.tree.column("quantity", width=70, anchor=tk.CENTER)
+        self.tree.column("edition", width=300, anchor=tk.W)
+
+        # Row tags drive badge colors via the Treeview tag styling
+        self.tree.tag_configure(
+            "both",
+            background=EDITION_BG,
+            foreground=EDITION_FG,
+            font=self.badge_font,
+        )
+        self.tree.tag_configure(
+            "signed_only",
+            background=SIGNED_BG,
+            foreground=SIGNED_FG,
+            font=self.badge_font,
+        )
+        self.tree.tag_configure(
+            "special_only",
+            background=EDITION_BG,
+            foreground=EDITION_FG,
+            font=self.badge_font,
+        )
+        self.tree.tag_configure(
+            "plain",
+            background=PARCHMENT,
+            foreground=INK,
+        )
+
         self.tree.pack(fill=tk.BOTH, expand=True)
 
         form_outer = tk.Frame(main, bg=PARCHMENT)
@@ -175,7 +232,7 @@ class BookInventoryApp:
             style="Victorian.TEntry",
             on_select=self._on_title_suggestion,
         )
-        self.title_entry.grid(row=0, column=1, sticky=tk.EW, pady=6)
+        self.title_entry.grid(row=0, column=1, columnspan=3, sticky=tk.EW, pady=6)
 
         tk.Label(form, text="SKU", font=self.body_font, fg=INK, bg=PARCHMENT).grid(
             row=1, column=0, sticky=tk.W, padx=(0, 10), pady=6
@@ -184,19 +241,37 @@ class BookInventoryApp:
         self.sku_entry.grid(row=1, column=1, sticky=tk.W, pady=6)
 
         tk.Label(form, text="Quantity", font=self.body_font, fg=INK, bg=PARCHMENT).grid(
-            row=2, column=0, sticky=tk.W, padx=(0, 10), pady=6
+            row=1, column=2, sticky=tk.W, padx=(20, 10), pady=6
         )
         self.quantity_entry = ttk.Entry(form, width=10, style="Victorian.TEntry")
         self.quantity_entry.insert(0, "1")
-        self.quantity_entry.grid(row=2, column=1, sticky=tk.W, pady=6)
+        self.quantity_entry.grid(row=1, column=3, sticky=tk.W, pady=6)
+
+        # Edition flags — checkboxes styled to match the palette
+        self.signed_check = ttk.Checkbutton(
+            form,
+            text="Signed by the author",
+            variable=self.signed_var,
+            style="Victorian.TCheckbutton",
+        )
+        self.signed_check.grid(row=2, column=0, columnspan=2, sticky=tk.W, padx=(0, 20), pady=(4, 8))
+
+        self.special_check = ttk.Checkbutton(
+            form,
+            text="Special edition",
+            variable=self.special_var,
+            style="Victorian.TCheckbutton",
+        )
+        self.special_check.grid(row=2, column=2, columnspan=2, sticky=tk.W, padx=(0, 0), pady=(4, 8))
 
         buttons = tk.Frame(form, bg=PARCHMENT)
-        buttons.grid(row=3, column=0, columnspan=2, sticky=tk.W, pady=(10, 0))
+        buttons.grid(row=3, column=0, columnspan=4, sticky=tk.W, pady=(10, 0))
 
         self._make_button(buttons, "Add to Library", self.on_add).pack(side=tk.LEFT, padx=(0, 10))
         self._make_button(buttons, "Remove Selected", self.on_remove).pack(side=tk.LEFT)
 
         form.columnconfigure(1, weight=1)
+        form.columnconfigure(3, weight=1)
         self.title_entry.bind("<Return>", self._on_title_return)
         self.sku_entry.bind("<Return>", lambda _event: self.on_add())
         self.quantity_entry.bind("<Return>", lambda _event: self.on_add())
@@ -235,17 +310,37 @@ class BookInventoryApp:
             cursor="hand2",
         )
 
+    @staticmethod
+    def _badge_for(signed: bool, special: bool) -> tuple[str, str]:
+        """Return (tag, display_text) for the edition column."""
+        if signed and special:
+            return "both", GLYPH_BOTH
+        if signed:
+            return "signed_only", GLYPH_SIGNED
+        if special:
+            return "special_only", GLYPH_SPECIAL
+        return "plain", BADGES_PLAIN
+
     def refresh_list(self) -> None:
         for item in self.tree.get_children():
             self.tree.delete(item)
 
         books = load_books()
         for book in sorted(books, key=lambda b: b["title"].casefold()):
+            tag, badge_text = self._badge_for(
+                book["signed"], book["special_edition"]
+            )
             self.tree.insert(
                 "",
                 tk.END,
                 iid=str(book["id"]),
-                values=(book["title"], book["sku"], book["quantity"]),
+                values=(
+                    book["title"],
+                    book["sku"],
+                    book["quantity"],
+                    badge_text,
+                ),
+                tags=(tag,),
             )
 
         unique = len(books)
@@ -269,7 +364,13 @@ class BookInventoryApp:
         sku = self.sku_entry.get().strip() or self.title_entry.get_sku() or None
         try:
             quantity = self._parse_quantity()
-            add_book(title, quantity, sku=sku)
+            add_book(
+                title,
+                quantity,
+                sku=sku,
+                signed=self.signed_var.get(),
+                special_edition=self.special_var.get(),
+            )
         except ValueError as error:
             messagebox.showerror("Invalid Entry", str(error))
             return
@@ -278,6 +379,8 @@ class BookInventoryApp:
         self.sku_entry.delete(0, tk.END)
         self.quantity_entry.delete(0, tk.END)
         self.quantity_entry.insert(0, "1")
+        self.signed_var.set(False)
+        self.special_var.set(False)
         self.refresh_list()
 
     def on_remove(self) -> None:
