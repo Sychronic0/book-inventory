@@ -9,14 +9,15 @@ Layout (top to bottom inside the VictorianFrame):
 
 Selection of a suggestion in the title entry auto-fills the SKU field
 via AutocompleteEntry's on_select callback. Adding a book delegates to
-book_store.add_book, which handles duplicate-title quantity bumps and
-flag upgrades (see book_store.py header).
+book_store.add_book, which collapses into an existing row only when
+title + edition flags + SKU all match; otherwise it inserts a new row
+so each special copy is shown separately (see book_store.py header).
 """
 
 import tkinter as tk
 from tkinter import messagebox, ttk
 
-from book_store import add_book, load_books, remove_book, total_count
+from book_store import add_book, load_books, remove_book, total_count, unique_titles
 from autocomplete import AutocompleteEntry
 
 APP_TITLE = "Samantha's Book Library"
@@ -358,7 +359,7 @@ class BookInventoryApp:
                 tags=(tag,),
             )
 
-        unique = len(books)
+        unique = unique_titles(books)
         copies = total_count(books)
         self.summary_label.config(
             text=f"{unique} title{'s' if unique != 1 else ''}  ·  {copies} total cop{'ies' if copies != 1 else 'y'}"
@@ -406,8 +407,11 @@ class BookInventoryApp:
 
         item_id = selected[0]
         values = self.tree.item(item_id, "values")
-        title = values[0]
-        if not messagebox.askyesno("Remove Volume", f'Remove all copies of "{title}" from the library?'):
+        title, sku, quantity, badge_text = values[0], values[1], values[2], values[3]
+        edition_desc = badge_text if badge_text != BADGES_PLAIN else "plain"
+        plural = "y" if quantity == "1" else "ies"
+        prompt = f'Remove {quantity} cop{plural} of "{title}" ({edition_desc}) from the library?'
+        if not messagebox.askyesno("Remove Volume", prompt):
             return
 
         try:

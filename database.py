@@ -9,11 +9,18 @@ Responsibilities:
   - migrate_from_json()    — one-shot import of legacy books.json
   - get_connection()       — sqlite3 connection with Row factory + FK on
 
-Schema migrations are additive-only (ALTER TABLE ADD COLUMN); existing
-columns are detected via PRAGMA table_info so init_db is idempotent and
-safe to call on every operation.
+Schema migrations:
+  - Additive ALTER TABLE ADD COLUMN for new flags (idempotent).
+  - One-shot rebuild of the library table if it was created with the
+    pre-per-copy schema (UNIQUE on title). The rebuild splits any flagged
+    rows with quantity>1 into N rows of quantity=1, so each special
+    copy becomes its own row.
+  - The unique index is on (title, signed, special_edition, sku) so the
+    same SKU can appear on plain + signed editions of the same title
+    but never twice within the same edition.
 """
 
+import shutil
 import sqlite3
 from pathlib import Path
 
@@ -41,13 +48,97 @@ def _migrate_library_schema(connection: sqlite3.Connection) -> None:
         )
 
 
+def _library_has_old_title_unique(connection: sqlite3.Connection) -> bool:
+    """True if the library table still carries the pre-per-copy UNIQUE(title)."""
+    row = connection.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'library'"
+    ).fetchone()
+    if row is None or row["sql"] is None:
+        return False
+    # Crude but reliable for the two shapes we care about: a CREATE TABLE
+    # statement that contains "TITLE" + "UNIQUE" in the same column decl.
+    sql_upper = row["sql"].upper()
+    return "TITLE" in sql_upper and "UNIQUE" in sql_upper
+
+
+def _rebuild_library_for_per_copy(connection: sqlite3.Connection) -> None:
+    """Migrate the library table to the per-copy schema.
+
+    Drops UNIQUE on title, then splits any row where signed=1 or
+    special_edition=1 with quantity>1 into N rows of quantity=1. Plain
+    rows are copied through unchanged. Wrapped in a single transaction
+    so a failure rolls back atomically.
+    """
+    rows = connection.execute(
+        "SELECT id, title, sku, quantity, signed, special_edition FROM library"
+    ).fetchall()
+
+    connection.executescript(
+        """
+        CREATE TABLE library_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL COLLATE NOCASE,
+            sku TEXT,
+            quantity INTEGER NOT NULL DEFAULT 1 CHECK (quantity > 0),
+            signed INTEGER NOT NULL DEFAULT 0,
+            special_edition INTEGER NOT NULL DEFAULT 0
+        );
+        """
+    )
+
+    for row in rows:
+        title = row["title"]
+        sku = row["sku"]
+        signed = int(row["signed"])
+        special = int(row["special_edition"])
+        quantity = int(row["quantity"])
+
+        # Split flagged rows so each special copy is its own row.
+        # Keep the SKU on the first copy only — the SKU identifies the
+        # work/printing, not the individual physical copy, so subsequent
+        # copies of the same edition share the same key and would collide
+        # on the unique index. Users can still set distinct per-copy SKUs
+        # later via the edit flow.
+        if (signed or special) and quantity > 1:
+            for index in range(quantity):
+                copy_sku = sku if index == 0 else None
+                connection.execute(
+                    """
+                    INSERT INTO library_new (title, sku, quantity, signed, special_edition)
+                    VALUES (?, ?, 1, ?, ?)
+                    """,
+                    (title, copy_sku, signed, special),
+                )
+        else:
+            connection.execute(
+                """
+                INSERT INTO library_new (title, sku, quantity, signed, special_edition)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (title, sku, quantity, signed, special),
+            )
+
+    connection.executescript(
+        """
+        DROP TABLE library;
+        ALTER TABLE library_new RENAME TO library;
+        """
+    )
+
+
 def init_db() -> None:
+    # Back up before any destructive migration so a failure leaves the
+    # user's library recoverable. Backup is overwritten on each run.
+    if DB_FILE.exists():
+        backup = DB_FILE.with_suffix(".db.migrating")
+        shutil.copy2(DB_FILE, backup)
+
     with get_connection() as connection:
         connection.executescript(
             """
             CREATE TABLE IF NOT EXISTS library (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                title TEXT NOT NULL COLLATE NOCASE UNIQUE,
+                title TEXT NOT NULL COLLATE NOCASE,
                 sku TEXT,
                 quantity INTEGER NOT NULL DEFAULT 1 CHECK (quantity > 0),
                 signed INTEGER NOT NULL DEFAULT 0,
@@ -67,10 +158,21 @@ def init_db() -> None:
             """
         )
         _migrate_library_schema(connection)
+
+        # Drop the old global-unique SKU index if it exists from a prior
+        # schema. Safe even if it doesn't exist.
+        connection.execute("DROP INDEX IF EXISTS idx_library_sku")
+
+        if _library_has_old_title_unique(connection):
+            _rebuild_library_for_per_copy(connection)
+
+        # Per-(title + edition + sku) uniqueness. The same SKU can appear
+        # on plain and signed editions of one title, but never twice within
+        # the same edition. NULL SKUs are excluded from the index.
         connection.execute(
             """
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_library_sku
-            ON library(sku)
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_library_title_edition_sku
+            ON library(title COLLATE NOCASE, signed, special_edition, sku)
             WHERE sku IS NOT NULL AND sku != '';
             """
         )
