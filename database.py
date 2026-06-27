@@ -46,6 +46,8 @@ def _migrate_library_schema(connection: sqlite3.Connection) -> None:
         connection.execute(
             "ALTER TABLE library ADD COLUMN special_edition INTEGER NOT NULL DEFAULT 0"
         )
+    if "author" not in columns:
+        connection.execute("ALTER TABLE library ADD COLUMN author TEXT")
 
 
 def _library_has_old_title_unique(connection: sqlite3.Connection) -> bool:
@@ -70,7 +72,7 @@ def _rebuild_library_for_per_copy(connection: sqlite3.Connection) -> None:
     so a failure rolls back atomically.
     """
     rows = connection.execute(
-        "SELECT id, title, sku, quantity, signed, special_edition FROM library"
+        "SELECT id, title, sku, author, quantity, signed, special_edition FROM library"
     ).fetchall()
 
     connection.executescript(
@@ -79,6 +81,7 @@ def _rebuild_library_for_per_copy(connection: sqlite3.Connection) -> None:
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             title TEXT NOT NULL COLLATE NOCASE,
             sku TEXT,
+            author TEXT,
             quantity INTEGER NOT NULL DEFAULT 1 CHECK (quantity > 0),
             signed INTEGER NOT NULL DEFAULT 0,
             special_edition INTEGER NOT NULL DEFAULT 0
@@ -89,6 +92,7 @@ def _rebuild_library_for_per_copy(connection: sqlite3.Connection) -> None:
     for row in rows:
         title = row["title"]
         sku = row["sku"]
+        author = row["author"]
         signed = int(row["signed"])
         special = int(row["special_edition"])
         quantity = int(row["quantity"])
@@ -104,18 +108,18 @@ def _rebuild_library_for_per_copy(connection: sqlite3.Connection) -> None:
                 copy_sku = sku if index == 0 else None
                 connection.execute(
                     """
-                    INSERT INTO library_new (title, sku, quantity, signed, special_edition)
-                    VALUES (?, ?, 1, ?, ?)
+                    INSERT INTO library_new (title, sku, author, quantity, signed, special_edition)
+                    VALUES (?, ?, ?, 1, ?, ?)
                     """,
-                    (title, copy_sku, signed, special),
+                    (title, copy_sku, author, signed, special),
                 )
         else:
             connection.execute(
                 """
-                INSERT INTO library_new (title, sku, quantity, signed, special_edition)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO library_new (title, sku, author, quantity, signed, special_edition)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (title, sku, quantity, signed, special),
+                (title, sku, author, quantity, signed, special),
             )
 
     connection.executescript(
@@ -140,6 +144,7 @@ def init_db() -> None:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 title TEXT NOT NULL COLLATE NOCASE,
                 sku TEXT,
+                author TEXT,
                 quantity INTEGER NOT NULL DEFAULT 1 CHECK (quantity > 0),
                 signed INTEGER NOT NULL DEFAULT 0,
                 special_edition INTEGER NOT NULL DEFAULT 0

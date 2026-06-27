@@ -61,13 +61,13 @@ def load_books() -> list[dict]:
         Regular → Signed → Special Edition → Signed Special Edition
 
     Each entry is a dict with keys:
-        id, title, sku, quantity, signed, special_edition
+        id, title, sku, author, quantity, signed, special_edition
     """
     _ensure_db()
     with get_connection() as connection:
         rows = connection.execute(
             """
-            SELECT id, title, sku, quantity, signed, special_edition
+            SELECT id, title, sku, author, quantity, signed, special_edition
             FROM library
             """
         ).fetchall()
@@ -77,6 +77,7 @@ def load_books() -> list[dict]:
             "id": row["id"],
             "title": row["title"],
             "sku": row["sku"] or "",
+            "author": row["author"] or "",
             "quantity": row["quantity"],
             "signed": bool(row["signed"]),
             "special_edition": bool(row["special_edition"]),
@@ -89,6 +90,43 @@ def load_books() -> list[dict]:
         _EDITION_ORDER[(b["signed"], b["special_edition"])],
     ))
     return books
+
+
+def find_by_sku(sku: str) -> list[dict]:
+    """Return all library rows whose sku matches *sku* (case-sensitive exact match).
+
+    SKU is the unique identifier for a (title + edition) combination, so
+    in practice this returns 0 or 1 rows — but the schema permits sharing
+    a SKU across distinct editions, so we return a list for safety.
+
+    The sku parameter is normalized the same way add_book() normalizes
+    input, so callers can pass either a raw or stripped value.
+    """
+    sku = _normalize_sku(sku)
+    if not sku:
+        return []
+    _ensure_db()
+    with get_connection() as connection:
+        rows = connection.execute(
+            """
+            SELECT id, title, sku, author, quantity, signed, special_edition
+            FROM library
+            WHERE sku = ?
+            """,
+            (sku,),
+        ).fetchall()
+    return [
+        {
+            "id": row["id"],
+            "title": row["title"],
+            "sku": row["sku"] or "",
+            "author": row["author"] or "",
+            "quantity": row["quantity"],
+            "signed": bool(row["signed"]),
+            "special_edition": bool(row["special_edition"]),
+        }
+        for row in rows
+    ]
 
 
 def unique_titles(books: list[dict]) -> int:
@@ -106,6 +144,7 @@ def add_book(
     sku: str | None = None,
     signed: bool = False,
     special_edition: bool = False,
+    author: str | None = None,
 ) -> None:
     """Add *quantity* copies of *title* to the inventory.
 
@@ -115,69 +154,90 @@ def add_book(
 
     - If a row for this exact (title, signed, special_edition) already
       exists, its quantity is increased.
-    - A missing SKU on an existing row is filled in; an existing SKU is
-      never overwritten.
+    - A missing SKU or author on an existing row is filled in; existing
+      values are never overwritten.
     - Raises ValueError if:
         - *title* is empty
         - *quantity* is less than 1
         - *sku* is already assigned to a different (title + edition)
         - *sku* conflicts with the existing SKU for the same (title + edition)
+
+    All writes happen inside a single SQLite transaction; any ValueError
+    raised mid-flight rolls the transaction back so the database never
+    ends up in a half-applied state.
     """
     title = title.strip()
-    sku = _normalize_sku(sku)
     if not title:
         raise ValueError("Title cannot be empty.")
     if quantity < 1:
         raise ValueError("Quantity must be at least 1.")
+    sku = _normalize_sku(sku)
+    author = (author or "").strip() or None
 
     new_signed = int(bool(signed))
     new_special = int(bool(special_edition))
 
     _ensure_db()
     with get_connection() as connection:
-        # Look up the row for this exact (title + edition) combination.
-        row = connection.execute(
-            """
-            SELECT id, quantity, sku
-            FROM library
-            WHERE title = ? COLLATE NOCASE
-              AND signed = ?
-              AND special_edition = ?
-            """,
-            (title, new_signed, new_special),
-        ).fetchone()
+        try:
+            # ── Validate first: do all reads + SKU conflict checks before
+            # touching any rows, so we can raise cleanly without side effects.
+            if sku:
+                sku_row = connection.execute(
+                    "SELECT id, title, signed, special_edition FROM library WHERE sku = ?",
+                    (sku,),
+                ).fetchone()
+                if sku_row is not None:
+                    same_edition = (
+                        sku_row["title"].casefold() == title.casefold()
+                        and int(sku_row["signed"]) == new_signed
+                        and int(sku_row["special_edition"]) == new_special
+                    )
+                    if not same_edition:
+                        raise ValueError(
+                            f'SKU "{sku}" is already assigned to a different '
+                            f'(title, signed, special_edition) combination.'
+                        )
 
-        if row is None:
-            # New edition — insert a fresh row for this (title + edition).
-            connection.execute(
+            row = connection.execute(
                 """
-                INSERT INTO library (title, sku, quantity, signed, special_edition)
-                VALUES (?, ?, ?, ?, ?)
+                SELECT id, quantity, sku, author
+                FROM library
+                WHERE title = ? COLLATE NOCASE
+                  AND signed = ?
+                  AND special_edition = ?
                 """,
-                (title, sku, quantity, new_signed, new_special),
-            )
-        else:
-            # Same edition already exists — increase its stock quantity.
-            connection.execute(
-                "UPDATE library SET quantity = quantity + ? WHERE id = ?",
-                (quantity, row["id"]),
-            )
+                (title, new_signed, new_special),
+            ).fetchone()
 
-            # Fill in a missing SKU, but never overwrite an existing one.
-            if sku and not (row["sku"] or ""):
+            if row is None:
                 connection.execute(
-                    "UPDATE library SET sku = ? WHERE id = ?",
-                    (sku, row["id"]),
+                    """
+                    INSERT INTO library (title, sku, author, quantity, signed, special_edition)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (title, sku, author, quantity, new_signed, new_special),
                 )
-
-            # Reject a SKU that differs from the one already on this row.
-            if sku and (row["sku"] or "") and row["sku"] != sku:
-                raise ValueError(
-                    f'SKU "{sku}" conflicts with the existing SKU '
-                    f'"{row["sku"]}" for "{title}" '
-                    f'(signed={bool(signed)}, special_edition={bool(special_edition)}). '
-                    f'Remove the old SKU before assigning a new one.'
+            else:
+                connection.execute(
+                    "UPDATE library SET quantity = quantity + ? WHERE id = ?",
+                    (quantity, row["id"]),
                 )
+                # Fill missing SKU/author; never overwrite existing values.
+                if sku and not (row["sku"] or ""):
+                    connection.execute(
+                        "UPDATE library SET sku = ? WHERE id = ?",
+                        (sku, row["id"]),
+                    )
+                if author and not (row["author"] or ""):
+                    connection.execute(
+                        "UPDATE library SET author = ? WHERE id = ?",
+                        (author, row["id"]),
+                    )
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
 
 
 def remove_book(book_id: int) -> None:

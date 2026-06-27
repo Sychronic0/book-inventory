@@ -4,14 +4,19 @@ Layout (top to bottom inside the VictorianFrame):
   1. Header (title + decorative subtitle)
   2. Summary row — unique titles and total copies
   3. Treeview listing the library with separate Signed, Special Edition,
-     and Type columns so each edition flag is immediately visible
+     and Type columns so each edition flag is immediately visible.
+     Note: SKU is stored in the database and remains searchable via
+     book_store.find_by_sku(), but is hidden from the table to make
+     room for the Author column.
   4. Add/remove form — title (autocomplete), SKU, quantity, signed &
-     special-edition checkboxes
+     special-edition checkboxes, and an Author field that auto-fills
+     from the selected Open Library suggestion when available.
 
-Selection of a suggestion in the title entry auto-fills the SKU field
-via AutocompleteEntry's on_select callback. Adding a book delegates to
-book_store.add_book; the quantity column is incremented for an existing
-title rather than inserting a duplicate row.
+Selection of a suggestion in the title entry auto-fills both the SKU
+and Author fields via AutocompleteEntry's on_select callback. Adding
+a book delegates to book_store.add_book; the quantity column is
+incremented for an existing (title + edition) rather than inserting
+a duplicate row.
 """
 
 import tkinter as tk
@@ -64,8 +69,8 @@ class BookInventoryApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title(APP_TITLE)
-        self.root.geometry("1000x720")
-        self.root.minsize(800, 580)
+        self.root.geometry("1080x720")
+        self.root.minsize(880, 580)
         self.root.configure(bg=MAHOGANY)
 
         self.title_font = ("Georgia", 22, "bold")
@@ -191,8 +196,8 @@ class BookInventoryApp:
         list_panel = VictorianFrame(main)
         list_panel.grid(row=3, column=0, sticky=tk.NSEW, pady=(0, 12))
 
-        # Five columns: title, sku, quantity, signed flag, special edition flag, type
-        columns = ("title", "sku", "quantity", "signed", "special_edition", "type")
+        # Five columns: title, author, quantity, signed flag, special edition flag, type
+        columns = ("title", "author", "quantity", "signed", "special_edition", "type")
         self.tree = ttk.Treeview(
             list_panel.inner,
             columns=columns,
@@ -201,14 +206,14 @@ class BookInventoryApp:
             style="Victorian.Treeview",
         )
         self.tree.heading("title",          text="Volume Title")
-        self.tree.heading("sku",            text="SKU")
+        self.tree.heading("author",         text="Author")
         self.tree.heading("quantity",       text="Copies")
         self.tree.heading("signed",         text="Signed")
         self.tree.heading("special_edition",text="Special Ed.")
         self.tree.heading("type",           text="Type")
 
         self.tree.column("title",           width=260, anchor=tk.W)
-        self.tree.column("sku",             width=110, anchor=tk.W)
+        self.tree.column("author",          width=200, anchor=tk.W)
         self.tree.column("quantity",        width=60,  anchor=tk.CENTER)
         self.tree.column("signed",          width=80,  anchor=tk.CENTER)
         self.tree.column("special_edition", width=90,  anchor=tk.CENTER)
@@ -268,18 +273,24 @@ class BookInventoryApp:
         )
         self.title_entry.grid(row=0, column=1, columnspan=3, sticky=tk.EW, pady=6)
 
-        tk.Label(form, text="SKU", font=self.body_font, fg=INK, bg=PARCHMENT).grid(
+        tk.Label(form, text="Author", font=self.body_font, fg=INK, bg=PARCHMENT).grid(
             row=1, column=0, sticky=tk.W, padx=(0, 10), pady=6
         )
+        self.author_entry = ttk.Entry(form, width=30, style="Victorian.TEntry")
+        self.author_entry.grid(row=1, column=1, sticky=tk.W, pady=6)
+
+        tk.Label(form, text="SKU", font=self.body_font, fg=INK, bg=PARCHMENT).grid(
+            row=2, column=0, sticky=tk.W, padx=(0, 10), pady=6
+        )
         self.sku_entry = ttk.Entry(form, width=20, style="Victorian.TEntry")
-        self.sku_entry.grid(row=1, column=1, sticky=tk.W, pady=6)
+        self.sku_entry.grid(row=2, column=1, sticky=tk.W, pady=6)
 
         tk.Label(form, text="Quantity", font=self.body_font, fg=INK, bg=PARCHMENT).grid(
-            row=1, column=2, sticky=tk.W, padx=(20, 10), pady=6
+            row=2, column=2, sticky=tk.W, padx=(20, 10), pady=6
         )
         self.quantity_entry = ttk.Entry(form, width=10, style="Victorian.TEntry")
         self.quantity_entry.insert(0, "1")
-        self.quantity_entry.grid(row=1, column=3, sticky=tk.W, pady=6)
+        self.quantity_entry.grid(row=2, column=3, sticky=tk.W, pady=6)
 
         # Edition checkboxes
         self.signed_check = ttk.Checkbutton(
@@ -288,7 +299,7 @@ class BookInventoryApp:
             variable=self.signed_var,
             style="Victorian.TCheckbutton",
         )
-        self.signed_check.grid(row=2, column=0, columnspan=2, sticky=tk.W, padx=(0, 20), pady=(4, 8))
+        self.signed_check.grid(row=3, column=0, columnspan=2, sticky=tk.W, padx=(0, 20), pady=(4, 8))
 
         self.special_check = ttk.Checkbutton(
             form,
@@ -296,10 +307,10 @@ class BookInventoryApp:
             variable=self.special_var,
             style="Victorian.TCheckbutton",
         )
-        self.special_check.grid(row=2, column=2, columnspan=2, sticky=tk.W, pady=(4, 8))
+        self.special_check.grid(row=3, column=2, columnspan=2, sticky=tk.W, pady=(4, 8))
 
         buttons = tk.Frame(form, bg=PARCHMENT)
-        buttons.grid(row=3, column=0, columnspan=4, sticky=tk.W, pady=(10, 0))
+        buttons.grid(row=4, column=0, columnspan=4, sticky=tk.W, pady=(10, 0))
 
         self._make_button(buttons, "Add to Library", self.on_add).pack(side=tk.LEFT, padx=(0, 10))
         self._make_button(buttons, "Remove Selected", self.on_remove).pack(side=tk.LEFT)
@@ -307,6 +318,7 @@ class BookInventoryApp:
         form.columnconfigure(1, weight=1)
         form.columnconfigure(3, weight=1)
         self.title_entry.bind("<Return>", self._on_title_return)
+        self.author_entry.bind("<Return>", lambda _event: self.on_add())
         self.sku_entry.bind("<Return>", lambda _event: self.on_add())
         self.quantity_entry.bind("<Return>", lambda _event: self.on_add())
 
@@ -319,11 +331,15 @@ class BookInventoryApp:
         ).grid(row=5, column=0, pady=(14, 0))
 
     def _on_title_suggestion(self, suggestion: dict) -> None:
-        """Auto-fill the SKU field when a title suggestion is selected."""
+        """Auto-fill the SKU and Author fields when a title suggestion is selected."""
         sku = suggestion.get("sku", "")
         if sku:
             self.sku_entry.delete(0, tk.END)
             self.sku_entry.insert(0, sku)
+        author = suggestion.get("author", "")
+        if author and not self.author_entry.get().strip():
+            self.author_entry.delete(0, tk.END)
+            self.author_entry.insert(0, author)
 
     def _make_button(self, master: tk.Misc, text: str, command) -> tk.Button:
         """Create a styled Victorian button."""
@@ -379,7 +395,7 @@ class BookInventoryApp:
                 iid=str(book["id"]),
                 values=(
                     book["title"],
-                    book["sku"],
+                    book["author"],
                     book["quantity"],
                     signed_text,
                     special_text,
@@ -421,6 +437,7 @@ class BookInventoryApp:
         """Read the form fields and add a book to the inventory."""
         title = self.title_entry.get_title()
         sku = self.sku_entry.get().strip() or self.title_entry.get_sku() or None
+        author = self.author_entry.get().strip() or None
         try:
             quantity = self._parse_quantity()
             add_book(
@@ -429,6 +446,7 @@ class BookInventoryApp:
                 sku=sku,
                 signed=self.signed_var.get(),
                 special_edition=self.special_var.get(),
+                author=author,
             )
         except ValueError as error:
             messagebox.showerror("Invalid Entry", str(error))
@@ -436,6 +454,7 @@ class BookInventoryApp:
 
         self.title_entry.clear()
         self.sku_entry.delete(0, tk.END)
+        self.author_entry.delete(0, tk.END)
         self.quantity_entry.delete(0, tk.END)
         self.quantity_entry.insert(0, "1")
         self.signed_var.set(False)
@@ -453,7 +472,7 @@ class BookInventoryApp:
         values = self.tree.item(item_id, "values")
         title    = values[0]
         quantity = values[2]
-        type_label = values[5]
+        type_label = values[5]  # column 5 = type label
 
         qty = int(quantity)
         copy_word = "copy" if qty == 1 else "copies"
