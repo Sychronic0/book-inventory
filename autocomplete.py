@@ -16,12 +16,17 @@ from tkinter import ttk
 
 from book_search import search_books
 
-PARCHMENT = "#faf0dc"
-INK = "#2a1a12"
-BURGUNDY = "#5c2a2e"
-CREAM = "#f5e6c8"
-BRASS = "#8b6914"
-GOLD = "#c9a227"
+# Neutral fallback colours used when no theme provider is set.
+_DEFAULT_COLORS = {
+    "bg": "#faf0dc",
+    "fg": "#2a1a12",
+    "select_bg": "#8b6914",
+    "select_fg": "#f5e6c8",
+    "border": "#c9a227",
+    "border_hi": "#e8c547",
+    "scrollbar_bg": "#f5e6c8",
+    "scrollbar_active": "#8b6914",
+}
 
 VISIBLE_SUGGESTIONS = 8
 
@@ -42,6 +47,7 @@ class AutocompleteEntry(ttk.Entry):
         self._selected_sku = ""
         self._active_index = -1
 
+        self._theme_provider = None  # callable returning color dict
         self.bind("<KeyRelease>", self._on_key_release)
         self.bind("<KeyPress>", self._on_key_press)
         self.bind("<FocusOut>", self._schedule_hide_popup)
@@ -53,6 +59,23 @@ class AutocompleteEntry(ttk.Entry):
 
     def get_sku(self) -> str:
         return self._selected_sku
+
+    def set_theme_provider(self, provider) -> None:
+        """Set a callable that returns the current theme colour dict.
+
+        The dict should have keys: bg, fg, select_bg, select_fg,
+        border, border_hi, scrollbar_bg, scrollbar_active.
+        """
+        self._theme_provider = provider
+
+    def _theme_colors(self) -> dict:
+        """Return current theme colours, falling back to neutral defaults."""
+        if self._theme_provider is not None:
+            try:
+                return self._theme_provider()
+            except Exception:
+                pass
+        return _DEFAULT_COLORS
 
     def clear(self) -> None:
         self.delete(0, tk.END)
@@ -112,21 +135,22 @@ class AutocompleteEntry(ttk.Entry):
         self._hide_popup()
         self._active_index = 0
 
+        _c = self._theme_colors()
         self._popup_frame = tk.Frame(
             self.master,
-            bg=BURGUNDY,
+            bg=_c["border"],
             highlightthickness=1,
-            highlightbackground=GOLD,
+            highlightbackground=_c["border_hi"],
         )
 
         self._popup = tk.Listbox(
             self._popup_frame,
             height=VISIBLE_SUGGESTIONS,
             activestyle="none",
-            bg=PARCHMENT,
-            fg=INK,
-            selectbackground=BRASS,
-            selectforeground=CREAM,
+            bg=_c["bg"],
+            fg=_c["fg"],
+            selectbackground=_c["select_bg"],
+            selectforeground=_c["select_fg"],
             highlightthickness=0,
             font=("Georgia", 10),
             exportselection=False,
@@ -135,8 +159,8 @@ class AutocompleteEntry(ttk.Entry):
             self._popup_frame,
             orient=tk.VERTICAL,
             command=self._popup.yview,
-            troughcolor=PARCHMENT,
-            activebackground=BRASS,
+            troughcolor=_c["scrollbar_bg"],
+            activebackground=_c["scrollbar_active"],
             highlightthickness=0,
         )
         self._popup.configure(yscrollcommand=self._scrollbar.set)

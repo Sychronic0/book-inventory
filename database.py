@@ -162,6 +162,11 @@ def init_db() -> None:
 
             CREATE INDEX IF NOT EXISTS idx_catalog_title
             ON catalog(title COLLATE NOCASE);
+
+            CREATE TABLE IF NOT EXISTS prefs (
+                key   TEXT PRIMARY KEY,
+                value TEXT NOT NULL DEFAULT ''
+            );
             """
         )
         _migrate_library_schema(connection)
@@ -214,3 +219,32 @@ def migrate_from_json(json_path: Path) -> None:
                 "INSERT OR IGNORE INTO library (title, sku, quantity) VALUES (?, ?, ?)",
                 (title, sku, quantity),
             )
+
+PREF_KEY_THEME = "theme"
+
+
+def get_pref(key: str, default: str = "") -> str:
+    """Return the stored preference for *key*, or *default* if absent or on error."""
+    try:
+        init_db()
+        with get_connection() as conn:
+            row = conn.execute(
+                "SELECT value FROM prefs WHERE key = ?", (key,)
+            ).fetchone()
+            return row["value"] if row else default
+    except Exception:
+        return default
+
+
+def set_pref(key: str, value: str) -> None:
+    """Persist a preference *key* = *value*. Silent on failure."""
+    try:
+        init_db()
+        with get_connection() as conn:
+            conn.execute(
+                "INSERT INTO prefs(key, value) VALUES(?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (key, value),
+            )
+    except Exception:
+        pass
