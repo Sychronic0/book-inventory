@@ -65,9 +65,13 @@ def add_book(
                 raise ValueError(f'SKU "{sku}" is already assigned to another volume.')
 
         row = connection.execute(
-            "SELECT id, quantity, sku FROM library WHERE title = ? COLLATE NOCASE",
+            "SELECT id, quantity, sku, signed, special_edition "
+            "FROM library WHERE title = ? COLLATE NOCASE",
             (title,),
         ).fetchone()
+
+        new_signed = int(bool(signed))
+        new_special = int(bool(special_edition))
 
         if row is None:
             connection.execute(
@@ -75,17 +79,42 @@ def add_book(
                 INSERT INTO library (title, sku, quantity, signed, special_edition)
                 VALUES (?, ?, ?, ?, ?)
                 """,
-                (title, sku, quantity, int(bool(signed)), int(bool(special_edition))),
+                (title, sku, quantity, new_signed, new_special),
             )
         else:
+            # Bump quantity for the duplicate title.
             connection.execute(
                 "UPDATE library SET quantity = quantity + ? WHERE id = ?",
                 (quantity, row["id"]),
             )
+
+            # Fill in a missing SKU, but never overwrite an existing one
+            # (even if the new add passed a different SKU for the same title).
             if sku and not (row["sku"] or ""):
                 connection.execute(
                     "UPDATE library SET sku = ? WHERE id = ?",
                     (sku, row["id"]),
+                )
+
+            # Reject SKU conflicts on the same title rather than silently
+            # dropping the new add's SKU.
+            if sku and (row["sku"] or "") and row["sku"] != sku:
+                raise ValueError(
+                    f'SKU "{sku}" conflicts with the existing SKU "{row["sku"]}" '
+                    f'for "{title}".'
+                )
+
+            # Upgrade edition flags: once a copy of a title is signed or
+            # special, the row reflects it. Never downgrade — plain copies
+            # can't undo a signed flag.
+            existing_signed = int(row["signed"])
+            existing_special = int(row["special_edition"])
+            merged_signed = max(existing_signed, new_signed)
+            merged_special = max(existing_special, new_special)
+            if merged_signed != existing_signed or merged_special != existing_special:
+                connection.execute(
+                    "UPDATE library SET signed = ?, special_edition = ? WHERE id = ?",
+                    (merged_signed, merged_special, row["id"]),
                 )
 
 
