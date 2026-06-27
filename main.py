@@ -3,15 +3,15 @@
 Layout (top to bottom inside the VictorianFrame):
   1. Header (title + decorative subtitle)
   2. Summary row — unique titles and total copies
-  3. Treeview listing the library, with edition-flag badges per row
+  3. Treeview listing the library with separate Signed, Special Edition,
+     and Type columns so each edition flag is immediately visible
   4. Add/remove form — title (autocomplete), SKU, quantity, signed &
      special-edition checkboxes
 
 Selection of a suggestion in the title entry auto-fills the SKU field
 via AutocompleteEntry's on_select callback. Adding a book delegates to
-book_store.add_book, which collapses into an existing row only when
-title + edition flags + SKU all match; otherwise it inserts a new row
-so each special copy is shown separately (see book_store.py header).
+book_store.add_book; the quantity column is incremented for an existing
+title rather than inserting a duplicate row.
 """
 
 import tkinter as tk
@@ -39,10 +39,16 @@ EDITION_FG = "#2a1a12"       # ink text
 EDITION_BG = "#e8c547"       # gold pill
 BADGES_PLAIN = "—"
 
-# Glyphs used in the edition column (text-only badges inside the tree)
-GLYPH_SIGNED = "✦ Signed"
-GLYPH_SPECIAL = "❖ Special Edition"
-GLYPH_BOTH = "✦ Signed  ❖ Special Edition"
+# Glyphs used in the edition columns
+GLYPH_SIGNED = "✦ Yes"
+GLYPH_SPECIAL = "❖ Yes"
+GLYPH_NONE = "—"
+
+# Type label shown in the "Type" column
+TYPE_SIGNED_SPECIAL = "Signed Special Edition"
+TYPE_SIGNED = "Signed"
+TYPE_SPECIAL = "Special Edition"
+TYPE_REGULAR = "Regular"
 
 
 class VictorianFrame(tk.Frame):
@@ -58,8 +64,8 @@ class BookInventoryApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title(APP_TITLE)
-        self.root.geometry("900x720")
-        self.root.minsize(720, 580)
+        self.root.geometry("1000x720")
+        self.root.minsize(800, 580)
         self.root.configure(bg=MAHOGANY)
 
         self.title_font = ("Georgia", 22, "bold")
@@ -78,6 +84,7 @@ class BookInventoryApp:
         self.refresh_list()
 
     def _configure_styles(self) -> None:
+        """Set up ttk styles for the Victorian palette."""
         style = ttk.Style()
         style.theme_use("clam")
 
@@ -127,6 +134,7 @@ class BookInventoryApp:
         )
 
     def _build_ui(self) -> None:
+        """Construct all widgets and lay them out."""
         outer = tk.Frame(self.root, bg=MAHOGANY, padx=20, pady=20)
         outer.pack(fill=tk.BOTH, expand=True)
 
@@ -136,6 +144,7 @@ class BookInventoryApp:
         main.columnconfigure(0, weight=1)
         main.rowconfigure(3, weight=1)
 
+        # ── Header ──────────────────────────────────────────────────────────
         header = tk.Frame(main, bg=PARCHMENT)
         header.grid(row=0, column=0, sticky=tk.EW, pady=(0, 6))
 
@@ -157,6 +166,7 @@ class BookInventoryApp:
 
         tk.Frame(main, bg=GOLD, height=2).grid(row=1, column=0, sticky=tk.EW, pady=(10, 12))
 
+        # ── Summary row ─────────────────────────────────────────────────────
         summary_row = tk.Frame(main, bg=PARCHMENT)
         summary_row.grid(row=2, column=0, sticky=tk.EW, pady=(0, 10))
 
@@ -177,10 +187,12 @@ class BookInventoryApp:
         )
         self.summary_label.pack(side=tk.RIGHT)
 
+        # ── Book list (Treeview) ─────────────────────────────────────────────
         list_panel = VictorianFrame(main)
         list_panel.grid(row=3, column=0, sticky=tk.NSEW, pady=(0, 12))
 
-        columns = ("title", "sku", "quantity", "edition")
+        # Five columns: title, sku, quantity, signed flag, special edition flag, type
+        columns = ("title", "sku", "quantity", "signed", "special_edition", "type")
         self.tree = ttk.Treeview(
             list_panel.inner,
             columns=columns,
@@ -188,18 +200,23 @@ class BookInventoryApp:
             height=8,
             style="Victorian.Treeview",
         )
-        self.tree.heading("title", text="Volume Title")
-        self.tree.heading("sku", text="SKU")
-        self.tree.heading("quantity", text="Copies")
-        self.tree.heading("edition", text="Edition")
-        self.tree.column("title", width=300, anchor=tk.W)
-        self.tree.column("sku", width=140, anchor=tk.W)
-        self.tree.column("quantity", width=70, anchor=tk.CENTER)
-        self.tree.column("edition", width=300, anchor=tk.W)
+        self.tree.heading("title",          text="Volume Title")
+        self.tree.heading("sku",            text="SKU")
+        self.tree.heading("quantity",       text="Copies")
+        self.tree.heading("signed",         text="Signed")
+        self.tree.heading("special_edition",text="Special Ed.")
+        self.tree.heading("type",           text="Type")
 
-        # Row tags drive badge colors via the Treeview tag styling
+        self.tree.column("title",           width=260, anchor=tk.W)
+        self.tree.column("sku",             width=110, anchor=tk.W)
+        self.tree.column("quantity",        width=60,  anchor=tk.CENTER)
+        self.tree.column("signed",          width=80,  anchor=tk.CENTER)
+        self.tree.column("special_edition", width=90,  anchor=tk.CENTER)
+        self.tree.column("type",            width=180, anchor=tk.W)
+
+        # Row tags drive background/foreground colours per edition type
         self.tree.tag_configure(
-            "both",
+            "signed_special",
             background=EDITION_BG,
             foreground=EDITION_FG,
             font=self.badge_font,
@@ -217,13 +234,14 @@ class BookInventoryApp:
             font=self.badge_font,
         )
         self.tree.tag_configure(
-            "plain",
+            "regular",
             background=PARCHMENT,
             foreground=INK,
         )
 
         self.tree.pack(fill=tk.BOTH, expand=True)
 
+        # ── Add / Remove form ────────────────────────────────────────────────
         form_outer = tk.Frame(main, bg=PARCHMENT)
         form_outer.grid(row=4, column=0, sticky=tk.EW)
 
@@ -263,7 +281,7 @@ class BookInventoryApp:
         self.quantity_entry.insert(0, "1")
         self.quantity_entry.grid(row=1, column=3, sticky=tk.W, pady=6)
 
-        # Edition flags — checkboxes styled to match the palette
+        # Edition checkboxes
         self.signed_check = ttk.Checkbutton(
             form,
             text="Signed by the author",
@@ -278,7 +296,7 @@ class BookInventoryApp:
             variable=self.special_var,
             style="Victorian.TCheckbutton",
         )
-        self.special_check.grid(row=2, column=2, columnspan=2, sticky=tk.W, padx=(0, 0), pady=(4, 8))
+        self.special_check.grid(row=2, column=2, columnspan=2, sticky=tk.W, pady=(4, 8))
 
         buttons = tk.Frame(form, bg=PARCHMENT)
         buttons.grid(row=3, column=0, columnspan=4, sticky=tk.W, pady=(10, 0))
@@ -301,12 +319,14 @@ class BookInventoryApp:
         ).grid(row=5, column=0, pady=(14, 0))
 
     def _on_title_suggestion(self, suggestion: dict) -> None:
+        """Auto-fill the SKU field when a title suggestion is selected."""
         sku = suggestion.get("sku", "")
         if sku:
             self.sku_entry.delete(0, tk.END)
             self.sku_entry.insert(0, sku)
 
     def _make_button(self, master: tk.Misc, text: str, command) -> tk.Button:
+        """Create a styled Victorian button."""
         return tk.Button(
             master,
             text=text,
@@ -327,23 +347,30 @@ class BookInventoryApp:
         )
 
     @staticmethod
-    def _badge_for(signed: bool, special: bool) -> tuple[str, str]:
-        """Return (tag, display_text) for the edition column."""
+    def _row_meta(signed: bool, special: bool) -> tuple[str, str, str, str]:
+        """Return (tag, signed_text, special_text, type_label) for a book row.
+
+        tag             — Treeview row tag controlling background colour
+        signed_text     — value shown in the Signed column
+        special_text    — value shown in the Special Ed. column
+        type_label      — human-readable type shown in the Type column
+        """
         if signed and special:
-            return "both", GLYPH_BOTH
+            return "signed_special", GLYPH_SIGNED, GLYPH_SPECIAL, TYPE_SIGNED_SPECIAL
         if signed:
-            return "signed_only", GLYPH_SIGNED
+            return "signed_only",    GLYPH_SIGNED, GLYPH_NONE,    TYPE_SIGNED
         if special:
-            return "special_only", GLYPH_SPECIAL
-        return "plain", BADGES_PLAIN
+            return "special_only",   GLYPH_NONE,   GLYPH_SPECIAL, TYPE_SPECIAL
+        return     "regular",        GLYPH_NONE,   GLYPH_NONE,    TYPE_REGULAR
 
     def refresh_list(self) -> None:
+        """Reload books from the database and repopulate the Treeview."""
         for item in self.tree.get_children():
             self.tree.delete(item)
 
-        books = load_books()
-        for book in sorted(books, key=lambda b: b["title"].casefold()):
-            tag, badge_text = self._badge_for(
+        books = load_books()  # already sorted alphabetically by title
+        for book in books:
+            tag, signed_text, special_text, type_label = self._row_meta(
                 book["signed"], book["special_edition"]
             )
             self.tree.insert(
@@ -354,28 +381,44 @@ class BookInventoryApp:
                     book["title"],
                     book["sku"],
                     book["quantity"],
-                    badge_text,
+                    signed_text,
+                    special_text,
+                    type_label,
                 ),
                 tags=(tag,),
             )
 
-        unique = unique_titles(books)
+        n_titles = unique_titles(books)
         copies = total_count(books)
         self.summary_label.config(
-            text=f"{unique} title{'s' if unique != 1 else ''}  ·  {copies} total cop{'ies' if copies != 1 else 'y'}"
+            text=(
+                f"{n_titles} title{'s' if n_titles != 1 else ''}"
+                f"  ·  {copies} total cop{'ies' if copies != 1 else 'y'}"
+            )
         )
 
+
+
     def _parse_quantity(self) -> int:
+        """Parse the quantity field, defaulting to 1 if empty.
+
+        Raises ValueError with a clear message if the value is not a
+        positive integer.
+        """
         text = self.quantity_entry.get().strip()
         if not text:
             return 1
+        if not text.isdigit() or int(text) < 1:
+            raise ValueError(f'"{text}" is not a valid quantity. Please enter a whole number greater than zero.')
         return int(text)
 
     def _on_title_return(self, _event: tk.Event) -> str:
+        """Submit the form when Enter is pressed in the title field."""
         self.on_add()
         return "break"
 
     def on_add(self) -> None:
+        """Read the form fields and add a book to the inventory."""
         title = self.title_entry.get_title()
         sku = self.sku_entry.get().strip() or self.title_entry.get_sku() or None
         try:
@@ -400,6 +443,7 @@ class BookInventoryApp:
         self.refresh_list()
 
     def on_remove(self) -> None:
+        """Remove one copy of the selected book from the inventory."""
         selected = self.tree.selection()
         if not selected:
             messagebox.showinfo("No Selection", "Pray select a volume from the catalogue.")
@@ -407,10 +451,15 @@ class BookInventoryApp:
 
         item_id = selected[0]
         values = self.tree.item(item_id, "values")
-        title, sku, quantity, badge_text = values[0], values[1], values[2], values[3]
-        edition_desc = badge_text if badge_text != BADGES_PLAIN else "plain"
-        plural = "y" if quantity == "1" else "ies"
-        prompt = f'Remove {quantity} cop{plural} of "{title}" ({edition_desc}) from the library?'
+        title    = values[0]
+        quantity = values[2]
+        type_label = values[5]
+
+        qty = int(quantity)
+        copy_word = "copy" if qty == 1 else "copies"
+        prompt = (
+            f'Remove 1 of {qty} {copy_word} of "{title}" ({type_label}) from the library?'
+        )
         if not messagebox.askyesno("Remove Volume", prompt):
             return
 
