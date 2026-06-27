@@ -19,10 +19,10 @@ Inventory model:
     of a title always appear together.
 
 SKU rules:
-  - A SKU belongs to one (title + edition) combination.
-  - Cross-combination SKU conflicts raise ValueError before any row is
-    touched.
-  - An existing SKU is never silently overwritten; mismatches raise.
+  - SKU is a free-form annotation per row. The same SKU may appear on
+    any number of rows, including multiple rows for the same
+    (title + edition) combination.
+  - No SKU uniqueness is enforced at the database or application layer.
 """
 
 from pathlib import Path
@@ -159,8 +159,10 @@ def add_book(
     - Raises ValueError if:
         - *title* is empty
         - *quantity* is less than 1
-        - *sku* is already assigned to a different (title + edition)
-        - *sku* conflicts with the existing SKU for the same (title + edition)
+
+    SKU is a free-form annotation: the same SKU may be supplied for any
+    number of rows, and no conflict is raised. This allows, for example,
+    "Dune" Regular and "Dune" Special Edition to share a SKU.
 
     All writes happen inside a single SQLite transaction; any ValueError
     raised mid-flight rolls the transaction back so the database never
@@ -180,25 +182,6 @@ def add_book(
     _ensure_db()
     with get_connection() as connection:
         try:
-            # ── Validate first: do all reads + SKU conflict checks before
-            # touching any rows, so we can raise cleanly without side effects.
-            if sku:
-                sku_row = connection.execute(
-                    "SELECT id, title, signed, special_edition FROM library WHERE sku = ?",
-                    (sku,),
-                ).fetchone()
-                if sku_row is not None:
-                    same_edition = (
-                        sku_row["title"].casefold() == title.casefold()
-                        and int(sku_row["signed"]) == new_signed
-                        and int(sku_row["special_edition"]) == new_special
-                    )
-                    if not same_edition:
-                        raise ValueError(
-                            f'SKU "{sku}" is already assigned to a different '
-                            f'(title, signed, special_edition) combination.'
-                        )
-
             row = connection.execute(
                 """
                 SELECT id, quantity, sku, author

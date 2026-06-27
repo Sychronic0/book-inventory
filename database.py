@@ -15,9 +15,11 @@ Schema migrations:
     pre-per-copy schema (UNIQUE on title). The rebuild splits any flagged
     rows with quantity>1 into N rows of quantity=1, so each special
     copy becomes its own row.
-  - The unique index is on (title, signed, special_edition, sku) so the
-    same SKU can appear on plain + signed editions of the same title
-    but never twice within the same edition.
+  - SKU is a free-form annotation per row; no uniqueness constraint
+    anywhere. The same SKU may appear on multiple rows (different
+    editions of one title, or even multiple copies of one edition).
+  - A non-unique index on (title, signed, special_edition) keeps the
+    add_book() lookup fast.
 """
 
 import shutil
@@ -167,18 +169,20 @@ def init_db() -> None:
         # Drop the old global-unique SKU index if it exists from a prior
         # schema. Safe even if it doesn't exist.
         connection.execute("DROP INDEX IF EXISTS idx_library_sku")
+        # Drop the per-(title + edition + sku) uniqueness index from a
+        # prior schema. SKU is now a free-form annotation per row; the
+        # same SKU may appear on any number of rows, including multiple
+        # within one (title + edition).
+        connection.execute("DROP INDEX IF EXISTS idx_library_title_edition_sku")
 
         if _library_has_old_title_unique(connection):
             _rebuild_library_for_per_copy(connection)
 
-        # Per-(title + edition + sku) uniqueness. The same SKU can appear
-        # on plain and signed editions of one title, but never twice within
-        # the same edition. NULL SKUs are excluded from the index.
+        # Non-unique index speeds up title lookups in add_book().
         connection.execute(
             """
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_library_title_edition_sku
-            ON library(title COLLATE NOCASE, signed, special_edition, sku)
-            WHERE sku IS NOT NULL AND sku != '';
+            CREATE INDEX IF NOT EXISTS idx_library_title_edition
+            ON library(title COLLATE NOCASE, signed, special_edition);
             """
         )
 
