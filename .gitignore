@@ -8,6 +8,9 @@ library.db
 library.db.bak
 *.bak
 
+# Migration backup created by database.init_db() before destructive work.
+# Always an automatic artifact; never commit it.
+library.db.migrating
+
 # Editor / IDE
-.vscode/
 .idea/
