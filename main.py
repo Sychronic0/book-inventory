@@ -1,3 +1,18 @@
+"""Samantha's Book Library — Tkinter GUI entry point.
+
+Layout (top to bottom inside the VictorianFrame):
+  1. Header (title + decorative subtitle)
+  2. Summary row — unique titles and total copies
+  3. Treeview listing the library, with edition-flag badges per row
+  4. Add/remove form — title (autocomplete), SKU, quantity, signed &
+     special-edition checkboxes
+
+Selection of a suggestion in the title entry auto-fills the SKU field
+via AutocompleteEntry's on_select callback. Adding a book delegates to
+book_store.add_book, which handles duplicate-title quantity bumps and
+flag upgrades (see book_store.py header).
+"""
+
 import tkinter as tk
 from tkinter import messagebox, ttk
 

@@ -1,3 +1,16 @@
+"""AutocompleteEntry — a ttk.Entry that suggests books as you type.
+
+Built on a popup Listbox positioned beneath the entry. Behavior:
+  - Debounces keystrokes by 300ms before calling search_books.
+  - Up/Down arrows move the highlighted suggestion; Enter accepts it.
+  - Selecting a suggestion calls back to the host with the full dict
+    (title, author, sku, source_id) and stashes sku/title for retrieval
+    via get_sku() / get_title().
+  - Escape or FocusOut (after a short grace period) hides the popup.
+
+Color palette is shared with main.py for visual consistency.
+"""
+
 import tkinter as tk
 from tkinter import ttk
 

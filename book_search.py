@@ -1,3 +1,18 @@
+"""Book search — online via Open Library, with local catalog fallback.
+
+Pipeline:
+  1. search_books(query) tries Open Library first.
+  2. If the network call succeeds, results are cached into the catalog
+     table (INSERT OR IGNORE) for future offline use.
+  3. If the network call fails or returns nothing, search_local_catalog
+     falls back to LIKE-matching against the cached titles/authors.
+
+search_open_library returns at most DEFAULT_SEARCH_LIMIT results and
+deduplicates by casefolded title. Each result carries:
+  title, author, source_id (Open Library work key), sku (last path
+  segment of source_id), display ("Title — Author").
+"""
+
 import json
 import urllib.error
 import urllib.parse

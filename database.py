@@ -1,3 +1,19 @@
+"""SQLite layer for the book inventory.
+
+Owns the schema for two tables:
+  - library  : owned books with title, sku, quantity, edition flags
+  - catalog  : cached search results from Open Library for offline use
+
+Responsibilities:
+  - init_db()              — create tables + indexes, run schema migrations
+  - migrate_from_json()    — one-shot import of legacy books.json
+  - get_connection()       — sqlite3 connection with Row factory + FK on
+
+Schema migrations are additive-only (ALTER TABLE ADD COLUMN); existing
+columns are detected via PRAGMA table_info so init_db is idempotent and
+safe to call on every operation.
+"""
+
 import sqlite3
 from pathlib import Path
 

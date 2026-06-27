@@ -1,3 +1,19 @@
+"""Book storage layer — CRUD against the local SQLite library.
+
+Responsibilities:
+  - add_book / remove_book / load_books / total_count for the library table
+  - normalize SKU input (empty/whitespace -> None)
+  - delegate schema init and one-shot books.json migration to database.py
+
+Non-obvious behavior in add_book:
+  - Re-adding an existing title bumps quantity and upgrades signed /
+    special_edition flags via max(existing, new). Plain re-adds never
+    downgrade flags.
+  - SKU conflicts on the same title raise ValueError and the whole add
+    (including the quantity bump) rolls back atomically.
+  - Cross-title SKU conflicts raise before any row is touched.
+"""
+
 from pathlib import Path
 
 from database import get_connection, init_db, migrate_from_json
