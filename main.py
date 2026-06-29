@@ -9,6 +9,8 @@ Extra:
   - View > Theme switches between Victorian and Forest palettes (persisted)
 """
 
+import threading
+import urllib.request
 import tkinter as tk
 from tkinter import messagebox, ttk
 
@@ -19,6 +21,9 @@ from fonts import DISPLAY_FAMILY, BODY_FAMILY
 from theme import ThemeManager, build_themes
 
 APP_TITLE = "Samantha's Book Library"
+APP_VERSION = "1.0.0"
+VERSION_URL = "https://raw.githubusercontent.com/Sychronic0/book-inventory/main/VERSION"
+RELEASES_URL = "https://github.com/Sychronic0/book-inventory/releases"
 
 GLYPH_SIGNED  = "✦ Yes"
 GLYPH_SPECIAL = "❖ Yes"
@@ -67,6 +72,7 @@ class BookInventoryApp:
         self._build_menu()
         ThemeManager(self).apply(self.theme)
         self.refresh_list()
+        self._check_for_update()
 
     # ── Styles ───────────────────────────────────────────────────────────────
 
@@ -113,18 +119,20 @@ class BookInventoryApp:
             lightcolor=[("selected", c.border)],
             darkcolor=[("selected", c.border)])
 
+        row_font = f.body_f()
         for tree in (self.tree, self.search_tree):
             tree.tag_configure("signed_special",
                 background=c.tag_signed_special_bg,
-                foreground=c.tag_signed_special_fg, font=f.badge())
+                foreground=c.tag_signed_special_fg, font=row_font)
             tree.tag_configure("signed_only",
                 background=c.tag_signed_bg,
-                foreground=c.tag_signed_fg, font=f.badge())
+                foreground=c.tag_signed_fg, font=row_font)
             tree.tag_configure("special_only",
                 background=c.tag_special_bg,
-                foreground=c.tag_special_fg, font=f.badge())
+                foreground=c.tag_special_fg, font=row_font)
             tree.tag_configure("regular",
-                background=c.tag_regular_bg, foreground=c.tag_regular_fg)
+                background=c.tag_regular_bg, foreground=c.tag_regular_fg,
+                font=row_font)
             tree.configure(style="App.Treeview")
 
         for entry in (self.sku_entry, self.quantity_entry, self.author_entry,
@@ -140,6 +148,40 @@ class BookInventoryApp:
                 "border": c.border, "border_hi": c.border_hi,
                 "scrollbar_bg": c.surface_alt, "scrollbar_active": c.accent_hi,
             })
+
+    # ── Update checker ───────────────────────────────────────────────────────
+
+    def _check_for_update(self) -> None:
+        """Fetch the latest version string from GitHub in a background thread."""
+        def fetch():
+            try:
+                with urllib.request.urlopen(VERSION_URL, timeout=5) as resp:
+                    latest = resp.read().decode().strip()
+                if latest and latest != APP_VERSION:
+                    # Schedule UI update on the main thread
+                    self.root.after(0, lambda: self._show_update_banner(latest))
+            except Exception:
+                pass  # Silently ignore network failures
+
+        threading.Thread(target=fetch, daemon=True).start()
+
+    def _show_update_banner(self, latest: str) -> None:
+        """Show the update banner with the new version number."""
+        c = self.theme.colors
+        f = self.theme.fonts
+        self._update_banner.configure(bg=c.accent)
+        self._update_label.configure(
+            text=f"  ✦ Update available: v{latest} — click to download  ",
+            bg=c.accent, fg=c.text_on_accent, font=f.label())
+        self._update_dismiss.configure(
+            bg=c.accent, fg=c.text_on_accent,
+            activebackground=c.accent_hi, activeforeground=c.text_on_accent)
+        self._update_banner.grid()
+
+    def _open_releases(self, _event=None) -> None:
+        """Open the GitHub releases page in the default browser."""
+        import webbrowser
+        webbrowser.open(RELEASES_URL)
 
     # ── Menu ─────────────────────────────────────────────────────────────────
 
@@ -159,6 +201,14 @@ class BookInventoryApp:
         ThemeManager(self).apply(self.theme)
         set_pref(PREF_KEY_THEME, name)
         self.refresh_list()
+        # Re-theme banner if it's visible
+        if self._update_banner.winfo_ismapped():
+            c = self.theme.colors
+            f = self.theme.fonts
+            self._update_banner.configure(bg=c.accent)
+            self._update_label.configure(bg=c.accent, fg=c.text_on_accent, font=f.label())
+            self._update_dismiss.configure(bg=c.accent, fg=c.text_on_accent,
+                                           activebackground=c.accent_hi)
 
     # ── UI build ─────────────────────────────────────────────────────────────
 
@@ -192,7 +242,7 @@ class BookInventoryApp:
         self.title_label = tk.Label(self.header_frame, text=APP_TITLE)
         self.title_label.pack()
         self.subtitle_label = tk.Label(
-            self.header_frame, text="❦   I HOPE YOU LIKE THIS <3   ❦")
+            self.header_frame, text=f"❦   Version {APP_VERSION}   ❦")
         self.subtitle_label.pack(pady=(4, 0))
 
         self.divider = tk.Frame(tab, height=2)
@@ -294,6 +344,24 @@ class BookInventoryApp:
 
         self.footer_label = tk.Label(tab, text="— EST 1997 —")
         self.footer_label.grid(row=5, column=0, pady=(0, 8))
+
+        # Update banner — hidden until a newer version is detected
+        self._update_banner = tk.Frame(tab)
+        self._update_banner.grid(row=6, column=0, sticky=tk.EW, padx=16, pady=(0, 8))
+        self._update_banner.grid_remove()  # hidden by default
+
+        self._update_label = tk.Label(
+            self._update_banner,
+            text="",
+            cursor="hand2")
+        self._update_label.pack(side=tk.LEFT)
+        self._update_label.bind("<Button-1>", self._open_releases)
+
+        self._update_dismiss = tk.Button(
+            self._update_banner, text="✕",
+            command=self._update_banner.grid_remove,
+            relief=tk.FLAT, bd=0, padx=6, highlightthickness=0, cursor="hand2")
+        self._update_dismiss.pack(side=tk.RIGHT)
 
     def _build_search_tab(self) -> None:
         tab = tk.Frame(self.notebook)
@@ -577,7 +645,7 @@ class BookInventoryApp:
             ("special_only",   c.tag_special_bg,        c.tag_special_fg),
             ("regular",        c.tag_regular_bg,        c.tag_regular_fg),
         ]:
-            ov_tree.tag_configure(tag, background=bg, foreground=fg, font=f.badge())
+            ov_tree.tag_configure(tag, background=bg, foreground=fg)
 
         def populate(subset: list[dict]) -> None:
             for item in ov_tree.get_children():
