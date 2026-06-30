@@ -167,14 +167,30 @@ class ThemeManager:
             fg=c.accent, bg=c.surface,
             activeforeground=c.accent_hi, activebackground=c.surface,
             font=f.label())
+        app._export_btn.configure(
+            fg=c.text_muted, bg=c.surface,
+            activeforeground=c.text, activebackground=c.surface,
+            font=f.label())
+        app._wishlist_toggle_btn.configure(
+            fg=c.accent, bg=c.surface,
+            activeforeground=c.accent_hi, activebackground=c.surface,
+            font=f.label())
 
         app.form_outer.configure(bg=c.surface)
+        app._collection_form.configure(bg=c.surface)
         app.form_heading.configure(fg=c.accent, bg=c.surface, font=f.label())
         app.form_panel_shell.configure(bg=c.border)
         app.form_panel_shell.inner.configure(bg=c.surface)
 
         for lbl in app.form_labels:
             lbl.configure(fg=c.text, bg=c.surface, font=f.body_f())
+
+        app._status_radios_parent.configure(bg=c.surface)
+        for rb in app._status_radios:
+            rb.configure(
+                fg=c.text, bg=c.surface,
+                activeforeground=c.text, activebackground=c.surface,
+                selectcolor=c.surface, font=f.body_f())
 
         app.signed_check.configure(style=f"{theme.name}.TCheckbutton")
         app.special_check.configure(style=f"{theme.name}.TCheckbutton")
@@ -187,6 +203,21 @@ class ThemeManager:
                 highlightbackground=c.border, font=f.button())
 
         app.footer_label.configure(fg=c.text_muted, bg=c.surface, font=f.footer())
+
+        # Wishlist form
+        app._wishlist_form.configure(bg=c.surface)
+        app._wishlist_heading.configure(fg=c.accent, bg=c.surface, font=f.label())
+        app._wishlist_form_shell.configure(bg=c.border)
+        app._wishlist_form_shell.inner.configure(bg=c.surface)
+        for lbl in app._wishlist_labels:
+            lbl.configure(fg=c.text, bg=c.surface, font=f.body_f())
+        for btn in app._wishlist_buttons:
+            btn.configure(
+                fg=c.text_on_accent, bg=c.accent,
+                activeforeground=c.text_on_accent, activebackground=c.accent_hi,
+                font=f.button())
+        for entry in (app._wish_title_entry, app._wish_author_entry, app._wish_notes_entry):
+            entry.configure(style="App.TEntry")
 
         # ── Search tab ───────────────────────────────────────────────────────
         app._search_tab.configure(bg=c.surface)

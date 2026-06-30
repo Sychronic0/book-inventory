@@ -1,37 +1,24 @@
 """Book storage layer — CRUD against the local SQLite inventory database.
 
-Responsibilities:
-  - add_book / remove_book / load_books / unique_titles / total_count
-    for the library table
-  - normalize SKU input (empty/whitespace -> None)
-  - delegate schema init and one-shot books.json migration to database.py
+Covers: library (owned books) and wishlist (wanted books).
 
 Inventory model:
-  - Each row in `library` represents a distinct edition of a title:
-      (title, signed, special_edition) is the natural key.
-  - Adding the same title with the same edition flags increases that
-    row's quantity. Adding it with different flags creates a new row,
-    so a Regular, a Signed, and a Special Edition of the same book each
-    get their own row and are listed separately in the UI.
-  - remove_book() decrements quantity by 1 and only deletes the row
-    when quantity reaches zero.
-  - Results are sorted by title (A→Z) then edition type so all copies
-    of a title always appear together.
-
-SKU rules:
-  - SKU is a free-form annotation per row. The same SKU may appear on
-    any number of rows, including multiple rows for the same
-    (title + edition) combination.
-  - No SKU uniqueness is enforced at the database or application layer.
+  - Each row in `library` represents a distinct edition of a title
+    (title, signed, special_edition). Adding with the same flags
+    increments quantity; different flags create a new row.
+  - remove_book() decrements quantity; deletes row at zero.
+  - edit_book() updates any field on a row by id.
+  - Wishlist is a separate table — simpler, no editions or quantity.
 """
 
 from pathlib import Path
 
-from database import get_connection, init_db, migrate_from_json
+from database import (
+    READING_STATUSES, get_connection, init_db, migrate_from_json
+)
 
 DATA_FILE = Path(__file__).parent / "books.json"
 
-# Edition-type sort order: Regular → Signed → Special → Signed+Special
 _EDITION_ORDER = {
     (False, False): 0,
     (True,  False): 1,
@@ -54,37 +41,34 @@ def _normalize_sku(sku: str | None) -> str | None:
     return sku or None
 
 
+def _row_to_dict(row) -> dict:
+    """Convert a library sqlite3.Row to a plain dict."""
+    return {
+        "id":             row["id"],
+        "title":          row["title"],
+        "sku":            row["sku"] or "",
+        "author":         row["author"] or "",
+        "quantity":       row["quantity"],
+        "signed":         bool(row["signed"]),
+        "special_edition":bool(row["special_edition"]),
+        "reading_status": row["reading_status"] or "Unread",
+        "notes":          row["notes"] or "",
+        "cover_url":      row["cover_url"] or "",
+    }
+
+
+# ── Library ───────────────────────────────────────────────────────────────────
+
 def load_books() -> list[dict]:
-    """Return all books grouped by title (A→Z) then edition type.
-
-    Within each title the order is:
-        Regular → Signed → Special Edition → Signed Special Edition
-
-    Each entry is a dict with keys:
-        id, title, sku, author, quantity, signed, special_edition
-    """
+    """Return all books grouped by title (A→Z) then edition type."""
     _ensure_db()
     with get_connection() as connection:
         rows = connection.execute(
-            """
-            SELECT id, title, sku, author, quantity, signed, special_edition
-            FROM library
-            """
+            "SELECT id, title, sku, author, quantity, signed, special_edition, "
+            "reading_status, notes, cover_url FROM library"
         ).fetchall()
 
-    books = [
-        {
-            "id": row["id"],
-            "title": row["title"],
-            "sku": row["sku"] or "",
-            "author": row["author"] or "",
-            "quantity": row["quantity"],
-            "signed": bool(row["signed"]),
-            "special_edition": bool(row["special_edition"]),
-        }
-        for row in rows
-    ]
-
+    books = [_row_to_dict(row) for row in rows]
     books.sort(key=lambda b: (
         b["title"].casefold(),
         _EDITION_ORDER[(b["signed"], b["special_edition"])],
@@ -92,50 +76,14 @@ def load_books() -> list[dict]:
     return books
 
 
-def find_by_sku(sku: str) -> list[dict]:
-    """Return all library rows whose sku matches *sku* (case-sensitive exact match).
-
-    SKU is the unique identifier for a (title + edition) combination, so
-    in practice this returns 0 or 1 rows — but the schema permits sharing
-    a SKU across distinct editions, so we return a list for safety.
-
-    The sku parameter is normalized the same way add_book() normalizes
-    input, so callers can pass either a raw or stripped value.
-    """
-    sku = _normalize_sku(sku)
-    if not sku:
-        return []
-    _ensure_db()
-    with get_connection() as connection:
-        rows = connection.execute(
-            """
-            SELECT id, title, sku, author, quantity, signed, special_edition
-            FROM library
-            WHERE sku = ?
-            """,
-            (sku,),
-        ).fetchall()
-    return [
-        {
-            "id": row["id"],
-            "title": row["title"],
-            "sku": row["sku"] or "",
-            "author": row["author"] or "",
-            "quantity": row["quantity"],
-            "signed": bool(row["signed"]),
-            "special_edition": bool(row["special_edition"]),
-        }
-        for row in rows
-    ]
-
-
 def unique_titles(books: list[dict]) -> int:
-    """Return the number of distinct titles in *books* with quantity > 0.
-
-    Accepts the list returned by load_books() so the caller avoids a
-    second database round-trip.
-    """
+    """Return the number of distinct titles with quantity > 0."""
     return len({book["title"].casefold() for book in books if book["quantity"] > 0})
+
+
+def total_count(books: list[dict]) -> int:
+    """Return the total number of copies across all books."""
+    return sum(book["quantity"] for book in books)
 
 
 def add_book(
@@ -145,36 +93,20 @@ def add_book(
     signed: bool = False,
     special_edition: bool = False,
     author: str | None = None,
+    reading_status: str = "Unread",
+    notes: str | None = None,
 ) -> None:
-    """Add *quantity* copies of *title* to the inventory.
-
-    Each unique combination of (title, signed, special_edition) is stored
-    as its own row, so Regular, Signed, and Special Edition copies of the
-    same title are tracked separately.
-
-    - If a row for this exact (title, signed, special_edition) already
-      exists, its quantity is increased.
-    - A missing SKU or author on an existing row is filled in; existing
-      values are never overwritten.
-    - Raises ValueError if:
-        - *title* is empty
-        - *quantity* is less than 1
-
-    SKU is a free-form annotation: the same SKU may be supplied for any
-    number of rows, and no conflict is raised. This allows, for example,
-    "Dune" Regular and "Dune" Special Edition to share a SKU.
-
-    All writes happen inside a single SQLite transaction; any ValueError
-    raised mid-flight rolls the transaction back so the database never
-    ends up in a half-applied state.
-    """
+    """Add *quantity* copies of *title* to the inventory."""
     title = title.strip()
     if not title:
         raise ValueError("Title cannot be empty.")
     if quantity < 1:
         raise ValueError("Quantity must be at least 1.")
-    sku = _normalize_sku(sku)
+    if reading_status not in READING_STATUSES:
+        reading_status = "Unread"
+    sku    = _normalize_sku(sku)
     author = (author or "").strip() or None
+    notes  = (notes or "").strip() or None
 
     new_signed = int(bool(signed))
     new_special = int(bool(special_edition))
@@ -183,77 +115,179 @@ def add_book(
     with get_connection() as connection:
         try:
             row = connection.execute(
-                """
-                SELECT id, quantity, sku, author
-                FROM library
-                WHERE title = ? COLLATE NOCASE
-                  AND signed = ?
-                  AND special_edition = ?
-                """,
+                "SELECT id, quantity, sku, author FROM library "
+                "WHERE title = ? COLLATE NOCASE AND signed = ? AND special_edition = ?",
                 (title, new_signed, new_special),
             ).fetchone()
 
             if row is None:
                 connection.execute(
-                    """
-                    INSERT INTO library (title, sku, author, quantity, signed, special_edition)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                    """,
-                    (title, sku, author, quantity, new_signed, new_special),
+                    "INSERT INTO library (title, sku, author, quantity, signed, "
+                    "special_edition, reading_status, notes) VALUES (?,?,?,?,?,?,?,?)",
+                    (title, sku, author, quantity, new_signed, new_special,
+                     reading_status, notes),
                 )
             else:
                 connection.execute(
                     "UPDATE library SET quantity = quantity + ? WHERE id = ?",
                     (quantity, row["id"]),
                 )
-                # Fill missing SKU/author; never overwrite existing values.
                 if sku and not (row["sku"] or ""):
-                    connection.execute(
-                        "UPDATE library SET sku = ? WHERE id = ?",
-                        (sku, row["id"]),
-                    )
+                    connection.execute("UPDATE library SET sku = ? WHERE id = ?",
+                                       (sku, row["id"]))
                 if author and not (row["author"] or ""):
-                    connection.execute(
-                        "UPDATE library SET author = ? WHERE id = ?",
-                        (author, row["id"]),
-                    )
+                    connection.execute("UPDATE library SET author = ? WHERE id = ?",
+                                       (author, row["id"]))
             connection.commit()
         except Exception:
             connection.rollback()
             raise
 
 
-def remove_book(book_id: int) -> None:
-    """Remove one copy of the book identified by *book_id* from inventory.
+def edit_book(
+    book_id: int,
+    title: str,
+    author: str | None = None,
+    sku: str | None = None,
+    quantity: int = 1,
+    signed: bool = False,
+    special_edition: bool = False,
+    reading_status: str = "Unread",
+    notes: str | None = None,
+) -> None:
+    """Update all editable fields on the row identified by *book_id*."""
+    title = title.strip()
+    if not title:
+        raise ValueError("Title cannot be empty.")
+    if quantity < 1:
+        raise ValueError("Quantity must be at least 1.")
+    if reading_status not in READING_STATUSES:
+        reading_status = "Unread"
+    sku    = _normalize_sku(sku)
+    author = (author or "").strip() or None
+    notes  = (notes or "").strip() or None
 
-    Decrements the quantity by 1. When quantity reaches zero the row is
-    deleted from the database entirely.
-
-    Raises ValueError if *book_id* does not exist in the library.
-    """
     _ensure_db()
     with get_connection() as connection:
         row = connection.execute(
-            "SELECT id, title, quantity FROM library WHERE id = ?",
-            (book_id,),
+            "SELECT id FROM library WHERE id = ?", (book_id,)
+        ).fetchone()
+        if row is None:
+            raise ValueError(f"Book ID {book_id} not found.")
+        connection.execute(
+            "UPDATE library SET title=?, author=?, sku=?, quantity=?, signed=?, "
+            "special_edition=?, reading_status=?, notes=? WHERE id=?",
+            (title, author, sku, quantity, int(bool(signed)),
+             int(bool(special_edition)), reading_status, notes, book_id),
+        )
+
+
+def update_cover_url(book_id: int, cover_url: str) -> None:
+    """Store a fetched cover URL against *book_id*."""
+    _ensure_db()
+    with get_connection() as connection:
+        connection.execute(
+            "UPDATE library SET cover_url = ? WHERE id = ?", (cover_url, book_id)
+        )
+
+
+def remove_book(book_id: int) -> None:
+    """Decrement quantity by 1; delete the row when it reaches zero."""
+    _ensure_db()
+    with get_connection() as connection:
+        row = connection.execute(
+            "SELECT id, title, quantity FROM library WHERE id = ?", (book_id,)
         ).fetchone()
         if row is None:
             raise ValueError(
                 f"Book ID {book_id} was not found in the inventory. "
                 "It may have already been removed."
             )
-
         if row["quantity"] > 1:
-            # Decrease the stock count by one copy.
             connection.execute(
-                "UPDATE library SET quantity = quantity - 1 WHERE id = ?",
-                (book_id,),
+                "UPDATE library SET quantity = quantity - 1 WHERE id = ?", (book_id,)
             )
         else:
-            # Last copy removed — delete the inventory record entirely.
             connection.execute("DELETE FROM library WHERE id = ?", (book_id,))
 
 
-def total_count(books: list[dict]) -> int:
-    """Return the total number of copies across all books in *books*."""
-    return sum(book["quantity"] for book in books)
+def find_by_sku(sku: str) -> list[dict]:
+    """Return all library rows whose sku matches *sku*."""
+    sku = _normalize_sku(sku)
+    if not sku:
+        return []
+    _ensure_db()
+    with get_connection() as connection:
+        rows = connection.execute(
+            "SELECT id, title, sku, author, quantity, signed, special_edition, "
+            "reading_status, notes, cover_url FROM library WHERE sku = ?", (sku,)
+        ).fetchall()
+    return [_row_to_dict(row) for row in rows]
+
+
+# ── Wishlist ──────────────────────────────────────────────────────────────────
+
+def load_wishlist() -> list[dict]:
+    """Return all wishlist entries sorted by title."""
+    _ensure_db()
+    with get_connection() as connection:
+        rows = connection.execute(
+            "SELECT id, title, author, notes FROM wishlist ORDER BY title COLLATE NOCASE"
+        ).fetchall()
+    return [
+        {"id": r["id"], "title": r["title"],
+         "author": r["author"] or "", "notes": r["notes"] or ""}
+        for r in rows
+    ]
+
+
+def add_to_wishlist(title: str, author: str | None = None,
+                    notes: str | None = None) -> None:
+    """Add a book to the wishlist."""
+    title = title.strip()
+    if not title:
+        raise ValueError("Title cannot be empty.")
+    author = (author or "").strip() or None
+    notes  = (notes or "").strip() or None
+    _ensure_db()
+    with get_connection() as connection:
+        connection.execute(
+            "INSERT INTO wishlist (title, author, notes) VALUES (?, ?, ?)",
+            (title, author, notes),
+        )
+
+
+def remove_from_wishlist(wishlist_id: int) -> None:
+    """Remove an entry from the wishlist by id."""
+    _ensure_db()
+    with get_connection() as connection:
+        row = connection.execute(
+            "SELECT id FROM wishlist WHERE id = ?", (wishlist_id,)
+        ).fetchone()
+        if row is None:
+            raise ValueError(f"Wishlist entry {wishlist_id} not found.")
+        connection.execute("DELETE FROM wishlist WHERE id = ?", (wishlist_id,))
+
+
+def move_wishlist_to_library(
+    wishlist_id: int,
+    quantity: int = 1,
+    signed: bool = False,
+    special_edition: bool = False,
+    reading_status: str = "Unread",
+) -> None:
+    """Move a wishlist entry into the library and remove it from the wishlist."""
+    _ensure_db()
+    with get_connection() as connection:
+        row = connection.execute(
+            "SELECT title, author, notes FROM wishlist WHERE id = ?", (wishlist_id,)
+        ).fetchone()
+        if row is None:
+            raise ValueError(f"Wishlist entry {wishlist_id} not found.")
+        title  = row["title"]
+        author = row["author"]
+        notes  = row["notes"]
+
+    add_book(title, quantity, signed=signed, special_edition=special_edition,
+             author=author, reading_status=reading_status, notes=notes)
+    remove_from_wishlist(wishlist_id)

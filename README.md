@@ -2,7 +2,7 @@
 
 A Victorian-styled desktop app for tracking which books you own and how many copies you have.
 
-## Run
+## Run (This is just for me, when you download, there's a batch script.)
 
 ```powershell
 cd C:\Users\black\book-inventory
@@ -30,3 +30,23 @@ Your collection is saved in `library.db`. If you had data in `books.json`, it is
 | `book_store.py` | Add, remove, and load books from the database |
 
 Internet is needed the first time you search for a new title. After that, matching titles can appear from the local cache even without a connection.
+
+## Keeping Your Library Across Computers
+
+Your book data is stored in `library.db` in the app folder.
+
+To access it on any computer:
+1. Move the entire `book-inventory` folder into your OneDrive folder
+   (e.g. `C:\Users\black\OneDrive\book-inventory`)
+2. Run the app from there as normal
+3. OneDrive will automatically sync your library to any computer
+   you're signed into
+
+**Never move just the `.db` file on its own — keep the whole folder together.**
+
+## Running the App
+Double-click `run.bat` to launch.
+
+Or from the terminal:
+    cd path\to\book-inventory
+    python main.py
