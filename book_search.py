@@ -23,6 +23,56 @@ from database import get_connection, init_db
 DEFAULT_SEARCH_LIMIT = 20
 
 
+def lookup_by_isbn(isbn: str) -> dict | None:
+    """Look up a single book by ISBN via Open Library.
+
+    Returns a dict with title, author, source_id, sku, cover_url — or
+    None if the ISBN has no match or the request fails.
+
+    Accepts ISBN-10 or ISBN-13, with or without hyphens/spaces.
+    """
+    isbn = "".join(ch for ch in isbn.strip() if ch.isalnum())
+    if not isbn:
+        return None
+
+    url = f"https://openlibrary.org/api/books?bibkeys=ISBN:{isbn}&format=json&jscmd=data"
+
+    try:
+        with urllib.request.urlopen(url, timeout=5) as response:
+            payload = json.load(response)
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
+        return None
+
+    entry = payload.get(f"ISBN:{isbn}")
+    if not entry:
+        return None
+
+    title = str(entry.get("title", "")).strip()
+    if not title:
+        return None
+
+    authors = entry.get("authors") or []
+    author = ", ".join(a.get("name", "") for a in authors[:2] if a.get("name"))
+
+    source_id = str(entry.get("key", "")).strip()
+    sku = sku_from_source_id(source_id) or isbn
+
+    cover_url = ""
+    cover = entry.get("cover") or {}
+    if cover.get("medium"):
+        cover_url = cover["medium"]
+
+    return {
+        "title": title,
+        "author": author,
+        "source_id": source_id,
+        "sku": sku,
+        "isbn": isbn,
+        "cover_url": cover_url,
+        "display": f"{title} — {author}" if author else title,
+    }
+
+
 def sku_from_source_id(source_id: str) -> str:
     source_id = source_id.strip()
     if not source_id:

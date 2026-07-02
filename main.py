@@ -28,6 +28,8 @@ from autocomplete import AutocompleteEntry
 from database import PREF_KEY_THEME, READING_STATUSES, get_pref, set_pref
 from fonts import DISPLAY_FAMILY, BODY_FAMILY
 from theme import ThemeManager, build_themes
+from book_search import lookup_by_isbn
+from barcode_scanner import BarcodeScanner, scanner_available
 
 APP_TITLE    = "Samantha's Book Library"
 APP_VERSION  = "1.0.0"
@@ -85,6 +87,8 @@ class BookInventoryApp:
         self._search_after_id = None
         self._search_view     = "table"
         self._library_view    = "collection"  # "collection" or "wishlist"
+        self._sort_col        = None
+        self._sort_reverse    = False
 
         self._build_ui()
         self._build_menu()
@@ -190,6 +194,7 @@ class BookInventoryApp:
         ThemeManager(self).apply(self.theme)
         set_pref(PREF_KEY_THEME, name)
         self.refresh_list()
+        self.refresh_stats()
         if self._update_banner.winfo_ismapped():
             c = self.theme.colors
             f = self.theme.fonts
@@ -274,6 +279,7 @@ class BookInventoryApp:
 
         self._build_library_tab()
         self._build_search_tab()
+        self._build_stats_tab()
 
     def _build_library_tab(self) -> None:
         tab = tk.Frame(self.notebook)
@@ -337,7 +343,7 @@ class BookInventoryApp:
         self._collection_frame.columnconfigure(0, weight=1)
         self._collection_frame.rowconfigure(0, weight=1)
 
-        self.tree = self._make_treeview(self._collection_frame)
+        self.tree = self._make_treeview(self._collection_frame, sortable=True)
         self.tree.grid(row=0, column=0, sticky=tk.NSEW)
         self.tree.bind("<Double-1>", self._on_tree_double_click)
         scroll = ttk.Scrollbar(self._collection_frame, orient=tk.VERTICAL,
@@ -458,9 +464,11 @@ class BookInventoryApp:
 
         btn_add    = self._make_button(self.button_row, "Add to Library",  self.on_add)
         btn_remove = self._make_button(self.button_row, "Remove Selected", self.on_remove)
+        btn_scan   = self._make_button(self.button_row, "📷 Scan Barcode", self._open_scan_dialog)
         btn_add.pack(side=tk.LEFT, padx=(0,10))
-        btn_remove.pack(side=tk.LEFT)
-        self.action_buttons = [btn_add, btn_remove]
+        btn_remove.pack(side=tk.LEFT, padx=(0,10))
+        btn_scan.pack(side=tk.LEFT)
+        self.action_buttons = [btn_add, btn_remove, btn_scan]
 
         form.columnconfigure(1, weight=1)
         form.columnconfigure(3, weight=1)
@@ -570,7 +578,7 @@ class BookInventoryApp:
         self._table_frame.columnconfigure(0, weight=1)
         self._table_frame.rowconfigure(0, weight=1)
 
-        self.search_tree = self._make_treeview(self._table_frame)
+        self.search_tree = self._make_treeview(self._table_frame, sortable=True)
         self.search_tree.grid(row=0, column=0, sticky=tk.NSEW)
         scroll = ttk.Scrollbar(self._table_frame, orient=tk.VERTICAL,
                                command=self.search_tree.yview)
@@ -597,16 +605,26 @@ class BookInventoryApp:
         self._grid_canvas.bind("<Configure>", self._on_canvas_configure)
         self._grid_canvas.bind("<MouseWheel>", self._on_grid_scroll)
 
-    def _make_treeview(self, parent) -> ttk.Treeview:
+    def _make_treeview(self, parent, sortable: bool = False) -> ttk.Treeview:
         tree = ttk.Treeview(parent, columns=TREE_COLUMNS,
                             show="headings", height=10, style="App.Treeview")
-        tree.heading("title",           text="Volume Title")
-        tree.heading("author",          text="Author")
-        tree.heading("quantity",        text="Copies")
-        tree.heading("signed",          text="Signed")
-        tree.heading("special_edition", text="Special Ed.")
-        tree.heading("type",            text="Type")
-        tree.heading("status",          text="Status")
+
+        headings = {
+            "title":           "Volume Title",
+            "author":          "Author",
+            "quantity":        "Copies",
+            "signed":          "Signed",
+            "special_edition": "Special Ed.",
+            "type":            "Type",
+            "status":          "Status",
+        }
+        for col, text in headings.items():
+            if sortable:
+                tree.heading(col, text=text,
+                             command=lambda c=col, t=tree: self._sort_tree(t, c))
+            else:
+                tree.heading(col, text=text)
+
         tree.column("title",           width=220, anchor=tk.W)
         tree.column("author",          width=160, anchor=tk.W)
         tree.column("quantity",        width=55,  anchor=tk.CENTER)
@@ -637,6 +655,230 @@ class BookInventoryApp:
             self._collection_form.pack(fill=tk.X)
             self.summary_header.configure(text="Collection at a glance")
             self.refresh_list()
+
+    # ── Column sorting ────────────────────────────────────────────────────────
+
+    def _sort_tree(self, tree: ttk.Treeview, col: str) -> None:
+        """Sort *tree* by *col*, toggling direction on repeated clicks."""
+        if self._sort_col == col:
+            self._sort_reverse = not self._sort_reverse
+        else:
+            self._sort_col    = col
+            self._sort_reverse = False
+
+        col_idx = TREE_COLUMNS.index(col)
+        rows = [(tree.set(iid, col), iid) for iid in tree.get_children("")]
+
+        # Numeric sort for quantity column, text otherwise
+        def sort_key(item):
+            val = item[0]
+            if col == "quantity":
+                try:
+                    return (0, int(val))
+                except ValueError:
+                    return (1, val.casefold())
+            return val.casefold()
+
+        rows.sort(key=sort_key, reverse=self._sort_reverse)
+        for idx, (_, iid) in enumerate(rows):
+            tree.move(iid, "", idx)
+
+        # Update heading to show sort direction arrow
+        arrow = " ↑" if not self._sort_reverse else " ↓"
+        heading_names = {
+            "title": "Volume Title", "author": "Author",
+            "quantity": "Copies", "signed": "Signed",
+            "special_edition": "Special Ed.", "type": "Type", "status": "Status",
+        }
+        for c in TREE_COLUMNS:
+            base = heading_names.get(c, c)
+            label = base + (arrow if c == col else "")
+            tree.heading(c, text=label,
+                         command=lambda tc=c, tr=tree: self._sort_tree(tr, tc))
+
+    # ── Stats tab ─────────────────────────────────────────────────────────────
+
+    def _build_stats_tab(self) -> None:
+        """Build the Stats dashboard tab."""
+        tab = tk.Frame(self.notebook)
+        tab.columnconfigure(0, weight=1)
+        tab.rowconfigure(1, weight=1)
+        self.notebook.add(tab, text="  Stats  ")
+        self._stats_tab = tab
+
+        # Header
+        self._stats_header = tk.Frame(tab)
+        self._stats_header.grid(row=0, column=0, sticky=tk.EW, padx=16, pady=(12,8))
+        self._stats_title_label = tk.Label(self._stats_header, text="Collection Statistics")
+        self._stats_title_label.pack(side=tk.LEFT)
+        refresh_btn = tk.Button(self._stats_header, text="↺ Refresh",
+                                command=self.refresh_stats,
+                                relief=tk.FLAT, bd=0, padx=8, highlightthickness=0,
+                                cursor="hand2")
+        refresh_btn.pack(side=tk.RIGHT)
+        self._stats_refresh_btn = refresh_btn
+
+        # Scrollable canvas for charts
+        canvas_frame = tk.Frame(tab)
+        canvas_frame.grid(row=1, column=0, sticky=tk.NSEW, padx=16, pady=(0,16))
+        canvas_frame.columnconfigure(0, weight=1)
+        canvas_frame.rowconfigure(0, weight=1)
+
+        self._stats_canvas = tk.Canvas(canvas_frame, highlightthickness=0, bd=0)
+        self._stats_canvas.grid(row=0, column=0, sticky=tk.NSEW)
+
+        stats_scroll = ttk.Scrollbar(canvas_frame, orient=tk.VERTICAL,
+                                     command=self._stats_canvas.yview)
+        stats_scroll.grid(row=0, column=1, sticky=tk.NS)
+        self._stats_canvas.configure(yscrollcommand=stats_scroll.set)
+        self._stats_canvas.bind("<MouseWheel>",
+            lambda e: self._stats_canvas.yview_scroll(
+                int(-1*(e.delta/120)), "units"))
+
+        self._stats_inner = tk.Frame(self._stats_canvas)
+        self._stats_canvas_win = self._stats_canvas.create_window(
+            (0,0), window=self._stats_inner, anchor=tk.NW)
+
+        self._stats_inner.bind("<Configure>", lambda e:
+            self._stats_canvas.configure(
+                scrollregion=self._stats_canvas.bbox("all")))
+        self._stats_canvas.bind("<Configure>", lambda e:
+            self._stats_canvas.itemconfig(self._stats_canvas_win, width=e.width))
+
+        # Bind tab switch to auto-refresh
+        self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
+
+    def _on_tab_changed(self, _event=None) -> None:
+        """Refresh stats when switching to the Stats tab."""
+        tab_id = self.notebook.select()
+        tab_text = self.notebook.tab(tab_id, "text").strip()
+        if tab_text == "Stats":
+            self.refresh_stats()
+
+    def refresh_stats(self) -> None:
+        """Rebuild all stat charts from current library data."""
+        for w in self._stats_inner.winfo_children():
+            w.destroy()
+
+        books = load_books()
+        c = self.theme.colors
+        f = self.theme.fonts
+
+        self._stats_canvas.configure(bg=c.surface)
+        self._stats_inner.configure(bg=c.surface)
+
+        if not books:
+            tk.Label(self._stats_inner,
+                     text="No books in your library yet.",
+                     font=f.subtitle(), fg=c.text_muted, bg=c.surface).pack(
+                pady=60)
+            return
+
+        # ── Summary strip ────────────────────────────────────────────────────
+        strip = tk.Frame(self._stats_inner, bg=c.surface)
+        strip.pack(fill=tk.X, padx=20, pady=(16,20))
+
+        n_titles  = unique_titles(books)
+        n_copies  = total_count(books)
+        n_signed  = sum(1 for b in books if b["signed"])
+        n_special = sum(1 for b in books if b["special_edition"])
+        n_authors = len({b["author"].casefold() for b in books if b["author"]})
+
+        stats = [
+            ("Titles",          str(n_titles)),
+            ("Total Copies",    str(n_copies)),
+            ("Signed",          str(n_signed)),
+            ("Special Editions",str(n_special)),
+            ("Authors",         str(n_authors)),
+        ]
+
+        for label, value in stats:
+            cell = tk.Frame(strip, bg=c.accent, padx=16, pady=12)
+            cell.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(0,8))
+            tk.Label(cell, text=value, font=(f.display, 22, "bold"),
+                     fg=c.text_on_accent, bg=c.accent).pack()
+            tk.Label(cell, text=label, font=f.subtitle(),
+                     fg=c.text_on_accent, bg=c.accent).pack()
+
+        # ── Bar chart helper ─────────────────────────────────────────────────
+        def bar_chart(title: str, data: dict, bar_color: str,
+                      max_bars: int = 10) -> None:
+            """Draw a simple horizontal bar chart onto the stats panel."""
+            if not data:
+                return
+
+            section = tk.Frame(self._stats_inner, bg=c.surface)
+            section.pack(fill=tk.X, padx=20, pady=(0,24))
+
+            tk.Label(section, text=title, font=f.label(),
+                     fg=c.accent, bg=c.surface).pack(anchor=tk.W, pady=(0,8))
+
+            items = sorted(data.items(), key=lambda x: x[1], reverse=True)[:max_bars]
+            if not items:
+                return
+            max_val = max(v for _, v in items) or 1
+            chart_w = 500
+
+            for label, value in items:
+                row = tk.Frame(section, bg=c.surface)
+                row.pack(fill=tk.X, pady=2)
+
+                # Label
+                tk.Label(row, text=str(label), font=f.body_f(),
+                         fg=c.text, bg=c.surface,
+                         width=22, anchor=tk.W).pack(side=tk.LEFT)
+
+                # Bar background
+                bar_bg = tk.Frame(row, bg=c.border, height=22,
+                                  width=chart_w)
+                bar_bg.pack(side=tk.LEFT, padx=(8,0))
+                bar_bg.pack_propagate(False)
+
+                # Bar fill
+                fill_w = max(4, int(chart_w * value / max_val))
+                bar_fill = tk.Frame(bar_bg, bg=bar_color, height=22,
+                                    width=fill_w)
+                bar_fill.place(x=0, y=0, height=22, width=fill_w)
+
+                # Value label on bar
+                tk.Label(row, text=str(value), font=f.body_f(),
+                         fg=c.text_muted, bg=c.surface,
+                         width=4, anchor=tk.W).pack(side=tk.LEFT, padx=(6,0))
+
+        # ── Reading status chart ──────────────────────────────────────────────
+        status_counts = {"Unread": 0, "Reading": 0, "Finished": 0, "DNF": 0}
+        for b in books:
+            s = b.get("reading_status", "Unread")
+            if s in status_counts:
+                status_counts[s] += 1
+        bar_chart("Reading Status", status_counts, c.accent)
+
+        # ── Edition type chart ────────────────────────────────────────────────
+        edition_counts = {"Regular": 0, "Signed": 0,
+                         "Special Edition": 0, "Signed Special Edition": 0}
+        for b in books:
+            _, _, _, tl = BookInventoryApp._row_meta(b["signed"], b["special_edition"])
+            edition_counts[tl] = edition_counts.get(tl, 0) + 1
+        bar_chart("Edition Types", edition_counts, c.accent_hi)
+
+        # ── Top authors chart ─────────────────────────────────────────────────
+        author_counts: dict[str,int] = {}
+        for b in books:
+            a = (b.get("author") or "").strip()
+            if a:
+                author_counts[a] = author_counts.get(a, 0) + b["quantity"]
+        if author_counts:
+            bar_chart("Top Authors (by copies)", author_counts,
+                      c.tag_special_bg, max_bars=10)
+
+        # ── Copies per title chart ────────────────────────────────────────────
+        title_counts: dict[str,int] = {}
+        for b in books:
+            title_counts[b["title"]] = title_counts.get(b["title"],0) + b["quantity"]
+        multi = {t: v for t, v in title_counts.items() if v > 1}
+        if multi:
+            bar_chart("Titles with Multiple Copies", multi,
+                      c.tag_signed_bg, max_bars=10)
 
     # ── View toggle (search grid/table) ──────────────────────────────────────
 
@@ -870,6 +1112,158 @@ class BookInventoryApp:
         close_btn.configure(bg=c.accent, fg=c.text_on_accent,
                             activebackground=c.accent_hi, activeforeground=c.text_on_accent)
         close_btn.pack(side=tk.RIGHT)
+
+    # ── Barcode scanning ──────────────────────────────────────────────────────
+
+    def _open_scan_dialog(self) -> None:
+        """Open a dialog offering webcam scan or manual ISBN entry."""
+        c = self.theme.colors
+        f = self.theme.fonts
+
+        dlg = tk.Toplevel(self.root)
+        dlg.title("Scan Barcode")
+        dlg.configure(bg=c.window_bg)
+        dlg.resizable(False, False)
+        dlg.grab_set()
+
+        frame = tk.Frame(dlg, bg=c.surface, padx=20, pady=20)
+        frame.pack(fill=tk.BOTH, expand=True)
+
+        tk.Label(frame, text="Scan a Book Barcode",
+                 font=f.title()[0:2] + ("bold",), fg=c.accent, bg=c.surface).pack(pady=(0,4))
+        tk.Label(frame, text="Point your webcam at the ISBN barcode on the back cover",
+                 font=f.subtitle(), fg=c.text_muted, bg=c.surface).pack(pady=(0,12))
+
+        preview_label = tk.Label(frame, bg=c.window_bg, width=53, height=20)
+        preview_label.pack(pady=(0,12))
+
+        status_label = tk.Label(frame, text="", font=f.body_f(),
+                                fg=c.text_muted, bg=c.surface)
+        status_label.pack(pady=(0,8))
+
+        scanner_state = {"scanner": None, "running": False}
+
+        def stop_scanner():
+            if scanner_state["scanner"]:
+                scanner_state["scanner"].stop()
+                scanner_state["scanner"] = None
+            scanner_state["running"] = False
+
+        def on_frame(frame_data):
+            if not scanner_state["running"]:
+                return
+            try:
+                from PIL import Image, ImageTk
+                import cv2
+                rgb = cv2.cvtColor(frame_data, cv2.COLOR_BGR2RGB)
+                img = Image.fromarray(rgb).resize((400, 300))
+                photo = ImageTk.PhotoImage(img)
+                preview_label.configure(image=photo, text="")
+                preview_label.image = photo
+            except Exception:
+                pass
+
+        def on_found(isbn: str):
+            stop_scanner()
+            status_label.configure(text=f"Found ISBN: {isbn} — looking up…", fg=c.accent)
+            dlg.update_idletasks()
+            self._lookup_and_close(isbn, dlg)
+
+        def poll_loop():
+            if scanner_state["running"] and scanner_state["scanner"]:
+                still_running = scanner_state["scanner"].poll()
+                if still_running:
+                    dlg.after(30, poll_loop)
+
+        def start_camera():
+            if not scanner_available():
+                status_label.configure(
+                    text="Webcam scanning needs: pip install opencv-python pyzbar",
+                    fg=c.text_muted)
+                return
+            scanner = BarcodeScanner()
+            ok = scanner.start(on_frame=on_frame, on_found=on_found)
+            if not ok:
+                status_label.configure(text="Could not open webcam.", fg=c.text_muted)
+                return
+            scanner_state["scanner"] = scanner
+            scanner_state["running"] = True
+            status_label.configure(text="Scanning… hold the barcode steady", fg=c.text_muted)
+            poll_loop()
+
+        cam_available = scanner_available()
+        scan_btn = self._make_button(
+            frame, "Start Camera" if cam_available else "Camera Scan Unavailable",
+            start_camera)
+        scan_btn.configure(bg=c.accent, fg=c.text_on_accent,
+                           activebackground=c.accent_hi, activeforeground=c.text_on_accent)
+        if not cam_available:
+            scan_btn.configure(state=tk.DISABLED)
+        scan_btn.pack(pady=(0,12))
+
+        tk.Frame(frame, bg=c.border, height=1).pack(fill=tk.X, pady=(0,12))
+
+        tk.Label(frame, text="Or enter ISBN manually:",
+                 font=f.label(), fg=c.text, bg=c.surface).pack(anchor=tk.W)
+
+        manual_row = tk.Frame(frame, bg=c.surface)
+        manual_row.pack(fill=tk.X, pady=(6,0))
+        isbn_entry = ttk.Entry(manual_row, width=24, style="App.TEntry")
+        isbn_entry.pack(side=tk.LEFT, padx=(0,8))
+
+        def manual_lookup():
+            isbn = isbn_entry.get().strip()
+            if not isbn:
+                return
+            stop_scanner()
+            status_label.configure(text="Looking up…", fg=c.accent)
+            dlg.update_idletasks()
+            self._lookup_and_close(isbn, dlg)
+
+        isbn_entry.bind("<Return>", lambda _e: manual_lookup())
+        lookup_btn = self._make_button(manual_row, "Look Up", manual_lookup)
+        lookup_btn.pack(side=tk.LEFT)
+
+        def on_close():
+            stop_scanner()
+            dlg.destroy()
+        dlg.protocol("WM_DELETE_WINDOW", on_close)
+
+        dlg.update_idletasks()
+        x = self.root.winfo_x() + (self.root.winfo_width()  - dlg.winfo_width())  // 2
+        y = self.root.winfo_y() + (self.root.winfo_height() - dlg.winfo_height()) // 2
+        dlg.geometry(f"+{x}+{y}")
+
+    def _lookup_and_close(self, isbn: str, dlg: tk.Toplevel) -> None:
+        """Look up *isbn*, fill the add form, and close the scan dialog."""
+        def do_lookup():
+            result = lookup_by_isbn(isbn)
+            self.root.after(0, lambda: self._apply_scan_result(result, isbn, dlg))
+        threading.Thread(target=do_lookup, daemon=True).start()
+
+    def _apply_scan_result(self, result: dict | None, isbn: str, dlg: tk.Toplevel) -> None:
+        """Fill the Add form with *result*, or show a not-found message."""
+        if dlg.winfo_exists():
+            dlg.destroy()
+
+        if result is None:
+            messagebox.showinfo(
+                "Not Found",
+                f"No book found for ISBN {isbn}.\n\n"
+                "You can still add it manually using the form below.")
+            return
+
+        self.title_entry.clear()
+        self.title_entry.insert(0, result["title"])
+        self.author_entry.delete(0, tk.END)
+        self.author_entry.insert(0, result.get("author", ""))
+        self.sku_entry.delete(0, tk.END)
+        self.sku_entry.insert(0, result.get("sku", "") or result.get("isbn", ""))
+
+        messagebox.showinfo(
+            "Book Found",
+            f'"{result["title"]}" filled into the form. Review and click '
+            '"Add to Library" to save it.')
 
     # ── Edit dialog ───────────────────────────────────────────────────────────
 

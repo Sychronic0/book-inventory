@@ -241,10 +241,22 @@ class ThemeManager:
                 selectcolor=c.surface,
                 font=f.body_f())
 
-        # Restyle both notebook tabs' bg
+        # Restyle all notebook tabs' bg
         for tab_id in app.notebook.tabs():
             w = app.notebook.nametowidget(tab_id)
             w.configure(bg=c.surface)
+
+        # Stats tab
+        if hasattr(app, '_stats_tab'):
+            app._stats_tab.configure(bg=c.surface)
+            app._stats_header.configure(bg=c.surface)
+            app._stats_title_label.configure(fg=c.accent, bg=c.surface, font=f.label())
+            app._stats_refresh_btn.configure(
+                fg=c.accent, bg=c.surface,
+                activeforeground=c.accent_hi, activebackground=c.surface,
+                font=f.label())
+            app._stats_canvas.configure(bg=c.surface)
+            app._stats_inner.configure(bg=c.surface)
 
         # Rebuild ttk styles + treeview tags
         app.theme = theme
