@@ -24,6 +24,7 @@ FILES = [
     "fonts.py",
     "autocomplete.py",
     "book_search.py",
+    "barcode_scanner.py",
     "updater.py",
 ]
 

@@ -32,7 +32,7 @@ from book_search import lookup_by_isbn
 from barcode_scanner import BarcodeScanner, scanner_available
 
 APP_TITLE    = "Samantha's Book Library"
-APP_VERSION  = "1.0.0"
+APP_VERSION  = "1.1.0"
 VERSION_URL  = "https://raw.githubusercontent.com/Sychronic0/book-inventory/main/VERSION"
 RELEASES_URL = "https://github.com/Sychronic0/book-inventory/releases"
 
@@ -1015,6 +1015,7 @@ class BookInventoryApp:
             tk.Label(badge_frame, text=type_label,
                      font=(f.body, 7, "bold"),
                      fg=badge_fg, bg=badge_bg).pack()
+            badge_frame.lift()  # ensure badge stays above cover image
 
             # Fetch cover in background if not cached
             if not cover_url:
@@ -1023,7 +1024,7 @@ class BookInventoryApp:
                 ).start()
 
     def _try_load_cover(self, card, url, spine, w, h) -> None:
-        """Attempt to load a cover image into the card. Falls back to plain bg."""
+        """Attempt to load a cover image into the card as a full overlay."""
         try:
             from PIL import Image, ImageTk
             import io
@@ -1031,11 +1032,12 @@ class BookInventoryApp:
                 data = resp.read()
             img = Image.open(io.BytesIO(data)).resize((w-2, h-2))
             photo = ImageTk.PhotoImage(img)
-            lbl = tk.Label(card, image=photo, bg=spine)
+            lbl = tk.Label(card, image=photo, bg=spine, bd=0)
             lbl.image = photo  # keep reference
-            lbl.pack(fill=tk.BOTH, expand=True)
+            # Place over the full card, covering the text layer
+            lbl.place(x=0, y=0, width=w-2, height=h-2)
         except Exception:
-            pass  # PIL not installed or network error — card stays as text
+            pass  # PIL not installed or network error — text card stays visible
 
     # ── Browse overlay ────────────────────────────────────────────────────────
 
