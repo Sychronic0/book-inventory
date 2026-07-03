@@ -1,0 +1,57 @@
+name: Discord Release Notification
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'VERSION'  # Only trigger when VERSION file changes
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2  # Need previous commit to get changelog
+
+      - name: Read version
+        id: version
+        run: echo "version=$(cat VERSION)" >> $GITHUB_OUTPUT
+
+      - name: Get commit message
+        id: commit
+        run: echo "message=$(git log -1 --pretty=%s)" >> $GITHUB_OUTPUT
+
+      - name: Post to Discord
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          MESSAGE="${{ steps.commit.outputs.message }}"
+          
+          curl -H "Content-Type: application/json" \
+               -d "{
+                 \"embeds\": [{
+                   \"title\": \"📚 Book Library — v${VERSION} Released\",
+                   \"description\": \"${MESSAGE}\",
+                   \"color\": 4861035,
+                   \"fields\": [
+                     {
+                       \"name\": \"How to update\",
+                       \"value\": \"Run \`python updater.py\` in your book-inventory folder\",
+                       \"inline\": false
+                     },
+                     {
+                       \"name\": \"Full changelog\",
+                       \"value\": \"[View on GitHub](https://github.com/Sychronic0/book-inventory/releases)\",
+                       \"inline\": true
+                     }
+                   ],
+                   \"footer\": {
+                     \"text\": \"Samantha's Book Library • v${VERSION}\"
+                   }
+                 }]
+               }" \
+               "$DISCORD_WEBHOOK"

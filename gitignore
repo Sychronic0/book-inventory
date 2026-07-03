@@ -1,0 +1,19 @@
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+
+# Local SQLite database (each user keeps their own library)
+library.db
+library.db.bak
+*.bak
+
+# Migration backup created by database.init_db() before destructive work.
+# Always an automatic artifact; never commit it.
+library.db.migrating
+
+# Editor / IDE
+.idea/
+
+# Discord webhook URL — keep private, never commit
+.discord_webhook
