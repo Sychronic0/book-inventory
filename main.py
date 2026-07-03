@@ -31,10 +31,15 @@ from theme import ThemeManager, build_themes
 from book_search import lookup_by_isbn
 from barcode_scanner import BarcodeScanner, scanner_available
 
-APP_TITLE    = "Samantha's Book Library"
 APP_VERSION  = "1.1.0"
+PREF_KEY_NAME = "owner_name"
+DEFAULT_NAME  = "Samantha"
+
+def get_app_title(name: str = DEFAULT_NAME) -> str:
+    return f"{name}'s Book Library"
 VERSION_URL  = "https://raw.githubusercontent.com/Sychronic0/book-inventory/main/VERSION"
 RELEASES_URL = "https://github.com/Sychronic0/book-inventory/releases"
+APP_TITLE    = "Book Library"  # fallback, replaced at runtime
 
 GLYPH_SIGNED  = "✦ Yes"
 GLYPH_SPECIAL = "❖ Yes"
@@ -74,12 +79,19 @@ class VictorianFrame(tk.Frame):
 class BookInventoryApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
-        self.root.title(APP_TITLE)
         self.root.geometry("1100x800")
         self.root.minsize(900, 620)
 
         saved = get_pref(PREF_KEY_THEME, VICTORIAN_THEME.name)
         self.theme = _THEMES.get(saved, VICTORIAN_THEME)
+
+        # Resolve owner name — prompt on first launch
+        owner = get_pref(PREF_KEY_NAME, "")
+        if not owner:
+            owner = self._prompt_for_name()
+            set_pref(PREF_KEY_NAME, owner)
+        self.owner_name = owner
+        self.root.title(get_app_title(self.owner_name))
 
         self.signed_var       = tk.BooleanVar(value=False)
         self.special_var      = tk.BooleanVar(value=False)
@@ -187,6 +199,12 @@ class BookInventoryApp:
         file_menu.add_command(label="Export Library to CSV…", command=self._export_csv)
         menubar.add_cascade(label="File", menu=file_menu)
 
+        settings_menu = tk.Menu(menubar, tearoff=False)
+        settings_menu.add_command(label="Change Library Name…", command=self._change_name)
+        menubar.add_cascade(label="Settings", menu=settings_menu)
+
+        menubar.add_command(label="Acknowledgments", command=self._open_acknowledgments)
+
         self.root.configure(menu=menubar)
 
     def _set_theme(self, name: str) -> None:
@@ -230,6 +248,120 @@ class BookInventoryApp:
 
     def _open_releases(self, _event=None) -> None:
         webbrowser.open(RELEASES_URL)
+
+    def _prompt_for_name(self, current: str = "") -> str:
+        """Show a welcome dialog asking for the owner's name."""
+        result = {"name": current or DEFAULT_NAME}
+
+        dlg = tk.Toplevel(self.root)
+        dlg.title("Welcome!")
+        dlg.configure(bg="#15101f")
+        dlg.resizable(False, False)
+        dlg.grab_set()
+
+        frame = tk.Frame(dlg, bg="#15101f", padx=36, pady=28)
+        frame.pack(fill=tk.BOTH, expand=True)
+
+        tk.Label(frame, text="Welcome to Your Book Library",
+                 font=("Georgia", 16, "bold"),
+                 fg="#4a2d6b", bg="#15101f").pack(pady=(0, 8))
+        tk.Label(frame, text="What should we call your library?",
+                 font=("Georgia", 11), fg="#f0ead6", bg="#15101f").pack(pady=(0, 4))
+        tk.Label(frame, text="Enter your name and we'll make it yours.",
+                 font=("Georgia", 9, "italic"),
+                 fg="#8a7a9c", bg="#15101f").pack(pady=(0, 16))
+
+        name_var = tk.StringVar(value=current or "")
+        entry = ttk.Entry(frame, textvariable=name_var, width=28, style="App.TEntry")
+        entry.pack(pady=(0, 6))
+        entry.focus_set()
+        entry.select_range(0, tk.END)
+
+        preview = tk.Label(frame, text="", font=("Georgia", 10, "italic"),
+                           fg="#8a7a9c", bg="#15101f")
+        preview.pack(pady=(0, 16))
+
+        def update_preview(*_):
+            n = name_var.get().strip()
+            preview.configure(text=f"→ {get_app_title(n)}" if n else "")
+
+        name_var.trace_add("write", update_preview)
+        update_preview()
+
+        def confirm():
+            n = name_var.get().strip()
+            result["name"] = n if n else DEFAULT_NAME
+            dlg.destroy()
+
+        entry.bind("<Return>", lambda _e: confirm())
+
+        tk.Button(frame, text="Let's Go →", command=confirm,
+                  font=("Georgia", 10, "bold"),
+                  fg="#f0ead6", bg="#4a2d6b",
+                  activeforeground="#f0ead6", activebackground="#6b3d8a",
+                  relief=tk.RAISED, bd=2, highlightthickness=0,
+                  padx=16, pady=6, cursor="hand2").pack()
+
+        dlg.update_idletasks()
+        sw = dlg.winfo_screenwidth()
+        sh = dlg.winfo_screenheight()
+        dlg.geometry(f"+{(sw - dlg.winfo_width())//2}+{(sh - dlg.winfo_height())//2}")
+        dlg.wait_window()
+        return result["name"]
+
+    def _change_name(self) -> None:
+        """Allow the user to change their library name."""
+        new_name = self._prompt_for_name(current=self.owner_name)
+        if new_name and new_name != self.owner_name:
+            self.owner_name = new_name
+            set_pref(PREF_KEY_NAME, new_name)
+            title = get_app_title(new_name)
+            self.root.title(title)
+            self.title_label.configure(text=title)
+
+    def _open_acknowledgments(self) -> None:
+        """Show the Acknowledgments dialog."""
+        c = self.theme.colors
+        f = self.theme.fonts
+
+        dlg = tk.Toplevel(self.root)
+        dlg.title("Acknowledgments")
+        dlg.configure(bg=c.window_bg)
+        dlg.resizable(False, False)
+        dlg.grab_set()
+
+        frame = tk.Frame(dlg, bg=c.surface, padx=30, pady=24)
+        frame.pack(fill=tk.BOTH, expand=True)
+
+        tk.Label(frame, text="Acknowledgments",
+                 font=f.title(), fg=c.accent, bg=c.surface).pack(pady=(0, 16))
+
+        # ── Edit this text to customise the acknowledgments ──
+        acknowledgments = """Made with love for Samantha.
+
+This library was built for her, in the event you're reading this, thank you for using it!        
+
+Built by Jared.
+
+Open Library (openlibrary.org) — book metadata and cover images.
+
+Thank you to everyone who contributed ideas, feedback, and patience."""
+        # ────────────────────────────────────────────────────
+
+        tk.Label(frame, text=acknowledgments,
+                 font=f.body_f(), fg=c.text, bg=c.surface,
+                 justify=tk.LEFT, wraplength=400).pack(anchor=tk.W, pady=(0, 20))
+
+        close_btn = self._make_button(frame, "Close", dlg.destroy)
+        close_btn.configure(bg=c.accent, fg=c.text_on_accent,
+                            activebackground=c.accent_hi,
+                            activeforeground=c.text_on_accent)
+        close_btn.pack(side=tk.RIGHT)
+
+        dlg.update_idletasks()
+        x = self.root.winfo_x() + (self.root.winfo_width()  - dlg.winfo_width())  // 2
+        y = self.root.winfo_y() + (self.root.winfo_height() - dlg.winfo_height()) // 2
+        dlg.geometry(f"+{x}+{y}")
 
     # ── Export ────────────────────────────────────────────────────────────────
 
@@ -291,7 +423,8 @@ class BookInventoryApp:
         # Header
         self.header_frame = tk.Frame(tab)
         self.header_frame.grid(row=0, column=0, sticky=tk.EW, padx=16, pady=(12, 4))
-        self.title_label = tk.Label(self.header_frame, text=APP_TITLE)
+        self.title_label = tk.Label(self.header_frame,
+                                    text=get_app_title(self.owner_name))
         self.title_label.pack()
         self.subtitle_label = tk.Label(
             self.header_frame, text=f"❦   Version {APP_VERSION}   ❦")
@@ -431,7 +564,9 @@ class BookInventoryApp:
         self.sku_entry = ttk.Entry(form, width=20, style="App.TEntry")
         self.sku_entry.grid(row=2, column=1, sticky=tk.W, pady=4)
 
-        self.quantity_entry = ttk.Entry(form, width=10, style="App.TEntry")
+        vcmd = (form.register(lambda P: P.isdigit() or P == ""), "%P")
+        self.quantity_entry = ttk.Entry(form, width=10, style="App.TEntry",
+                                        validate="key", validatecommand=vcmd)
         self.quantity_entry.insert(0, "1")
         self.quantity_entry.grid(row=2, column=3, sticky=tk.W, pady=4)
 
@@ -1047,7 +1182,7 @@ class BookInventoryApp:
         f = self.theme.fonts
 
         overlay = tk.Toplevel(self.root)
-        overlay.title(f"{APP_TITLE} — Full Collection")
+        overlay.title(f"{get_app_title(self.owner_name)} — Full Collection")
         overlay.configure(bg=c.window_bg)
         overlay.state("zoomed")
         overlay.grab_set()
