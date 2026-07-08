@@ -1,107 +1,141 @@
-# Samantha's Book Library
+# Book Library
 
-A Victorian/Forest-themed desktop app for tracking which books you own, how
-many copies you have, and what you still want to read.
+A themed desktop app for tracking your personal book collection — owned books,
+wishlist, reading status, and more.
+
+![Version](https://img.shields.io/badge/version-1.1.2-purple)
+
+---
 
 ## Running the App
 
-Double-click `run.bat`, or from a terminal:
+### Option A — EXE (recommended for most users)
+Download `BookLibrary.exe` from the [latest release](https://github.com/Sychronic0/book-inventory/releases)
+and double-click it. No Python or dependencies needed.
 
+Your library data (`library.db`) is saved next to the EXE — keep them together.
+
+### Option B — Python (developers)
 ```powershell
 cd path\to\book-inventory
 python main.py
 ```
+Requires Python 3.11+.
 
-## Keeping Your Library Across Computers
+---
 
-Your book data lives in `library.db` in the app folder. To access it on any
-computer, move the entire `book-inventory` folder into your OneDrive folder
-(e.g. `C:\Users\YourName\OneDrive\book-inventory`) and run it from there.
-OneDrive syncs the database automatically. **Never move just the `.db` file
-on its own — keep the whole folder together.**
+## First Launch
+On first launch you'll be asked for your name. The app titles itself
+accordingly — e.g. **Samantha's Book Library**. You can change this later
+via **Settings → Change Library Name…**
 
-## Updating to a New Version
-
-When a new version is pushed, the app shows an update banner at the bottom
-of the Library tab. Click it to open the releases page, then run:
-
-```powershell
-python updater.py
-```
-
-This pulls the latest `.py` files from GitHub. **Your library data is never
-touched** — only the application code is replaced.
+---
 
 ## Features
 
-### Library tab
-- View all owned books with quantity, author, SKU, signed/special edition
-  flags, reading status, and notes
-- **Edit any book** — double-click a row to open the edit dialog
-- **Add books** — duplicate (title + edition combo) entries increase quantity
-  rather than creating a new row
-- **Remove books** — decreases quantity by one; deletes the row at zero
-- **Scan Barcode** — webcam or manual ISBN lookup auto-fills the add form
-  (see Barcode Scanning below)
-- **Wishlist toggle** — switch the tab to a separate wishlist of books you
-  want but don't own yet; entries can be moved straight into your library
-- **Browse All** — fullscreen view of your entire collection with its own
-  search bar
-- **Export to CSV** — File menu or the Export CSV button saves your whole
-  library as a spreadsheet
+### Library Tab
+| Feature | Description |
+|---------|-------------|
+| Add books | Title, author, SKU, quantity, signed/special edition flags, reading status, notes |
+| Edit books | Double-click any row to edit all fields |
+| Remove books | Decrements quantity; deletes row when it reaches zero |
+| Scan barcode | Webcam or manual ISBN lookup auto-fills the add form |
+| Wishlist | Toggle to a separate wishlist; move entries into your library when acquired |
+| Browse All | Fullscreen view of your entire collection with its own search |
+| Export CSV | **File → Export Library to CSV…** saves a spreadsheet of your library |
+| Sortable columns | Click any column header to sort; click again to reverse |
 
-### Search tab
-- Live search across title, author, SKU, reading status, and edition type
-- Filter by type: Regular / Signed / Special Edition / Signed Special Edition
-- **Table or Grid view** — toggle between a sortable table and a shelf of
-  book covers, each showing title, author, quantity, and a type badge.
-  Cover art is fetched from Open Library when available.
+### Search Tab
+| Feature | Description |
+|---------|-------------|
+| Live search | Filters across title, author, SKU, reading status, and edition type |
+| Type filter | Narrow to Regular / Signed / Special Edition / Signed Special Edition |
+| Table view | Standard sortable table |
+| Grid view | Shelf of book covers with title, author, status badge, and type badge |
+
+### Stats Tab
+- Summary strip: titles, copies, signed, special editions, unique authors
+- Reading status breakdown (Unread / Reading / Finished / DNF)
+- Edition type breakdown
+- Top authors by copy count
+- Titles with multiple copies
 
 ### Themes
-View > Theme switches between **Victorian** (warm parchment, mahogany, gold)
-and **Forest** (body-rot horror — near-black violet, bruise-purple, sickly
-moss). Your choice is remembered between launches.
+**View → Theme** switches between:
+- **Victorian** — warm parchment, mahogany, burgundy, gold
+- **Forest** — body-rot horror palette (near-black violet, bruise-purple, moss green)
+
+Your theme choice is remembered between launches.
 
 ### Reading Status
-Every book can be marked Unread, Reading, Finished, or DNF (Did Not Finish).
+Every book tracks: **Unread · Reading · Finished · DNF**
+
+---
 
 ## Barcode Scanning
+The **📷 Scan Barcode** button supports webcam scanning and manual ISBN entry.
+Results auto-fill the add form for review before saving.
 
-The Scan Barcode button supports two modes:
-
-1. **Webcam scan** — point your camera at the ISBN barcode on a book's back
-   cover; it auto-detects and looks up the title.
-2. **Manual entry** — type the ISBN number directly if you don't have a
-   webcam or the scan doesn't catch.
-
-Either way, results fill the Add form for you to review before saving —
-nothing is added automatically.
-
-Webcam scanning requires two extra packages:
-
+Webcam scanning requires extra packages (not needed for the EXE build):
 ```powershell
 pip install opencv-python pyzbar
 ```
 
-If these aren't installed, manual ISBN entry still works; the camera button
-is simply disabled with a note telling you what to install.
+---
+
+## Keeping Your Data Across Computers
+Your library is stored in `library.db` next to the app. To sync across
+computers, move the entire folder into **OneDrive** — it syncs automatically.
+
+---
+
+## Updates
+
+When a new version is available, a banner appears in the Library tab.
+
+**EXE users:** download the new `BookLibrary.exe` from the releases page.
+
+**Python users:** run the updater:
+```powershell
+python updater.py
+```
+Your library data is never touched during updates.
+
+---
+
+## Building the EXE (developers)
+
+1. Install PyInstaller: `pip install pyinstaller`
+2. Place `app_icon.ico` in the repo folder
+3. Run: `build.bat` (or `pyinstaller book_library.spec --clean`)
+4. Output: `dist\BookLibrary.exe`
+
+---
 
 ## File Reference
 
 | File | Purpose |
 |------|---------|
-| `main.py` | The application UI (Tkinter) |
-| `book_store.py` | Add, edit, remove, and load books and wishlist entries |
-| `database.py` | Creates tables, handles schema migrations |
-| `book_search.py` | Open Library search + ISBN lookup, with local cache fallback |
-| `barcode_scanner.py` | Webcam capture and barcode decoding |
-| `autocomplete.py` | Title autocomplete widget used in the Add form |
-| `theme.py` | Victorian and Forest color/font palettes, live theme switching |
-| `fonts.py` | Resolves available display/body fonts on the current machine |
-| `updater.py` | Pulls the latest app files from GitHub |
-| `VERSION` | Current version number, checked against GitHub on launch |
-| `library.db` | Your book and wishlist data (SQLite) |
+| `main.py` | Application UI (Tkinter) |
+| `book_store.py` | Library and wishlist CRUD |
+| `database.py` | Schema, migrations, prefs |
+| `book_search.py` | Open Library search + ISBN lookup |
+| `barcode_scanner.py` | Webcam barcode decoding |
+| `autocomplete.py` | Title autocomplete widget |
+| `theme.py` | Victorian and Forest palettes |
+| `fonts.py` | Font resolution |
+| `updater.py` | Pulls latest files from GitHub |
+| `release.py` | Commits, pushes, triggers Discord notification |
+| `build.bat` | Builds the Windows EXE |
+| `book_library.spec` | PyInstaller build spec |
+| `VERSION` | Current version number |
+| `library.db` | Your book data (SQLite) — never committed |
 
-Internet is needed the first time you search for a new title, fetch cover
-art, or look up an ISBN. Matching titles can still appear from the local
-cache offline after you've searched once.
+---
+
+## Discord Notifications
+Releases are announced automatically in Discord via GitHub Actions.
+The workflow triggers whenever `VERSION` changes on a push to `main`.
+
+To set up: add your Discord webhook URL as a repository secret named
+`DISCORD_WEBHOOK` in **GitHub → Settings → Secrets and variables → Actions**.

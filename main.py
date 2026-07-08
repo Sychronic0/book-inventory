@@ -31,7 +31,7 @@ from theme import ThemeManager, build_themes
 from book_search import lookup_by_isbn
 from barcode_scanner import BarcodeScanner, scanner_available
 
-APP_VERSION  = "1.1.0"
+APP_VERSION  = "1.1.2"
 PREF_KEY_NAME = "owner_name"
 DEFAULT_NAME  = "Samantha"
 
@@ -247,7 +247,72 @@ class BookInventoryApp:
         self._update_banner.grid()
 
     def _open_releases(self, _event=None) -> None:
-        webbrowser.open(RELEASES_URL)
+        """Offer to update — behaviour differs for EXE vs Python installs."""
+        import subprocess
+        import sys
+        from pathlib import Path
+
+        # Detect whether running as a PyInstaller bundle
+        is_exe = getattr(sys, "frozen", False)
+        updater = Path(__file__).parent / "updater.py"
+
+        if is_exe:
+            # EXE users must download a new exe manually
+            messagebox.showinfo(
+                "Update Available",
+                "A new version is available!\n\n"
+                "To update:\n"
+                "1. Click OK to open the releases page\n"
+                "2. Download the new BookLibrary.exe\n"
+                "3. Replace your current BookLibrary.exe with the new one\n\n"
+                "⚠  Keep BookLibrary.exe and library.db in the same folder —\n"
+                "   your library data will not be affected.",
+            )
+            webbrowser.open(RELEASES_URL)
+
+        elif updater.exists():
+            # Python users can auto-update
+            answer = messagebox.askyesnocancel(
+                "Update Available",
+                "Would you like to update now?\n\n"
+                "• Yes — download and install the update automatically\n"
+                "  (the app will close and reopen when done)\n"
+                "• No — open the releases page in your browser\n"
+                "• Cancel — remind me later\n\n"
+                "Your library data will not be affected.",
+            )
+            if answer is True:
+                self._run_updater()
+            elif answer is False:
+                webbrowser.open(RELEASES_URL)
+
+        else:
+            webbrowser.open(RELEASES_URL)
+
+    def _run_updater(self) -> None:
+        """Run updater.py, then restart the app."""
+        import subprocess
+        import sys
+        from pathlib import Path
+
+        updater = Path(__file__).parent / "updater.py"
+        python  = sys.executable
+
+        try:
+            # Run updater in a new window so user can see progress
+            subprocess.Popen(
+                [python, str(updater), "--restart", python, __file__],
+                creationflags=subprocess.CREATE_NEW_CONSOLE
+                if sys.platform == "win32" else 0,
+            )
+            # Close this instance — updater will relaunch it
+            self.root.after(500, self.root.destroy)
+        except Exception as e:
+            messagebox.showerror(
+                "Update Failed",
+                f"Could not launch updater:\n{e}\n\n"
+                f"Try running updater.py manually."
+            )
 
     def _prompt_for_name(self, current: str = "") -> str:
         """Show a welcome dialog asking for the owner's name."""
