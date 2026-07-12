@@ -19,3 +19,7 @@ library.db.migrating
 .discord_webhook
 *.env
 .env
+
+# PyInstaller build output
+build/
+dist/
