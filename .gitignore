@@ -14,3 +14,8 @@ library.db.migrating
 
 # Editor / IDE
 .idea/
+
+# Local secrets — never commit
+.discord_webhook
+*.env
+.env
