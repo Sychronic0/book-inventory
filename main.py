@@ -13,10 +13,12 @@ Extra:
 
 import csv
 import os
+import sys
 import threading
 import urllib.request
 import webbrowser
 import tkinter as tk
+from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 from book_store import (
@@ -31,7 +33,22 @@ from theme import ThemeManager, build_themes
 from book_search import lookup_by_isbn
 from barcode_scanner import BarcodeScanner, scanner_available
 
-APP_VERSION  = "1.1.2"
+def _read_app_version() -> str:
+    """Read the app's own version from the local VERSION file.
+
+    This is the single source of truth for APP_VERSION so the update banner
+    can't drift out of sync with a hand-edited version literal — the exact
+    bug that made EXE builds show "update available" forever. Frozen
+    (onefile) builds unpack bundled data files into sys._MEIPASS at
+    runtime; running from source, VERSION sits next to main.py.
+    """
+    base = Path(getattr(sys, "_MEIPASS", Path(__file__).parent))
+    try:
+        return (base / "VERSION").read_text(encoding="utf-8").strip()
+    except OSError:
+        return "0.0.0"
+
+APP_VERSION  = _read_app_version()
 PREF_KEY_NAME = "owner_name"
 DEFAULT_NAME  = "Samantha"
 
@@ -249,8 +266,6 @@ class BookInventoryApp:
     def _open_releases(self, _event=None) -> None:
         """Offer to update — behaviour differs for EXE vs Python installs."""
         import subprocess
-        import sys
-        from pathlib import Path
 
         # Detect whether running as a PyInstaller bundle
         is_exe = getattr(sys, "frozen", False)
@@ -292,8 +307,6 @@ class BookInventoryApp:
     def _run_updater(self) -> None:
         """Run updater.py, then restart the app."""
         import subprocess
-        import sys
-        from pathlib import Path
 
         updater = Path(__file__).parent / "updater.py"
         python  = sys.executable

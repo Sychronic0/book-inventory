@@ -11,13 +11,11 @@ Inventory model:
   - Wishlist is a separate table — simpler, no editions or quantity.
 """
 
-from pathlib import Path
-
 from database import (
-    READING_STATUSES, get_connection, init_db, migrate_from_json
+    READING_STATUSES, app_dir, get_connection, init_db, migrate_from_json
 )
 
-DATA_FILE = Path(__file__).parent / "books.json"
+DATA_FILE = app_dir() / "books.json"
 
 _EDITION_ORDER = {
     (False, False): 0,

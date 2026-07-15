@@ -12,9 +12,23 @@ Schema migrations are additive ALTER TABLE ADD COLUMN (idempotent).
 
 import shutil
 import sqlite3
+import sys
 from pathlib import Path
 
-DB_FILE = Path(__file__).parent / "library.db"
+
+def app_dir() -> Path:
+    """Folder the app's writable data files should live in.
+
+    Frozen (PyInstaller) builds unpack into a temp folder that's wiped on
+    exit, so __file__ can't be trusted there — anchor to the exe's real
+    location instead. Running from source, __file__ is correct as-is.
+    """
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).parent
+    return Path(__file__).parent
+
+
+DB_FILE = app_dir() / "library.db"
 
 READING_STATUSES = ("Unread", "Reading", "Finished", "DNF")
 PREF_KEY_THEME   = "theme"
