@@ -12,6 +12,8 @@ Install with:
 
 from __future__ import annotations
 
+import sys
+
 
 def scanner_available() -> bool:
     """Return True if both opencv-python and pyzbar are importable."""
@@ -50,7 +52,13 @@ class BarcodeScanner:
         except ImportError:
             return False
 
-        self._cap = cv2.VideoCapture(self.camera_index)
+        # OpenCV's default MSMF backend fails to deliver frames on some
+        # webcams (opens fine, isOpened() is True, but every read() fails).
+        # DirectShow is the reliable backend for UVC devices on Windows.
+        if sys.platform == "win32":
+            self._cap = cv2.VideoCapture(self.camera_index, cv2.CAP_DSHOW)
+        else:
+            self._cap = cv2.VideoCapture(self.camera_index)
         if not self._cap.isOpened():
             self._cap = None
             return False

@@ -1391,6 +1391,8 @@ Thank you to everyone who contributed ideas, feedback, and patience."""
                     dlg.after(30, poll_loop)
 
         def start_camera():
+            if scanner_state["running"]:
+                return
             if not scanner_available():
                 status_label.configure(
                     text="Webcam scanning needs: pip install opencv-python pyzbar",
@@ -1403,6 +1405,7 @@ Thank you to everyone who contributed ideas, feedback, and patience."""
                 return
             scanner_state["scanner"] = scanner
             scanner_state["running"] = True
+            scan_btn.configure(state=tk.DISABLED)
             status_label.configure(text="Scanning… hold the barcode steady", fg=c.text_muted)
             poll_loop()
 

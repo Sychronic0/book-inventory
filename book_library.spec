@@ -7,10 +7,21 @@ from pathlib import Path
 
 block_cipher = None
 
+# pyzbar loads its bundled libzbar/libiconv DLLs via ctypes at import time,
+# which PyInstaller's static analysis can't see — without these, the frozen
+# exe silently reports "Camera Scan Unavailable" with no indication why.
+try:
+    import pyzbar
+    _pyzbar_dlls = [
+        (str(dll), 'pyzbar') for dll in Path(pyzbar.__file__).parent.glob('*.dll')
+    ]
+except ImportError:
+    _pyzbar_dlls = []
+
 a = Analysis(
     ['main.py'],
     pathex=['.'],
-    binaries=[],
+    binaries=_pyzbar_dlls,
     datas=[
         ('VERSION', '.'),
         ('books.json', '.'),
@@ -42,7 +53,7 @@ a = Analysis(
     hooksconfig={},
     runtime_hooks=[],
     excludes=[
-        'numpy',        # large, not needed unless PIL pulls it in
+        # numpy is a hard runtime dependency of cv2 — do not exclude it.
         'matplotlib',
         'scipy',
         'pandas',
