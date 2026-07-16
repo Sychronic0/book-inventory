@@ -63,6 +63,12 @@ class BarcodeScanner:
             self._cap = None
             return False
 
+        # Request a larger capture resolution so the live preview isn't just
+        # an upscaled, blurry version of the camera's default (often 640x480
+        # or smaller) frame.
+        self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+        self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+
         self._running = True
         self._on_frame = on_frame
         self._on_found = on_found

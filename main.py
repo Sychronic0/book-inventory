@@ -1349,8 +1349,20 @@ Thank you to everyone who contributed ideas, feedback, and patience."""
         tk.Label(frame, text="Point your webcam at the ISBN barcode on the back cover",
                  font=f.subtitle(), fg=c.text_muted, bg=c.surface).pack(pady=(0,12))
 
-        preview_label = tk.Label(frame, bg=c.window_bg, width=53, height=20)
+        # Label width/height are parsed as characters, not pixels, unless an
+        # image is already attached at the moment they're set — so size the
+        # widget by giving it a real placeholder image instead of guessing
+        # at width/height units (that previously blew the dialog up to
+        # thousands of pixels wide).
+        preview_label = tk.Label(frame, bg=c.window_bg)
         preview_label.pack(pady=(0,12))
+        try:
+            from PIL import Image, ImageTk
+            placeholder = ImageTk.PhotoImage(Image.new("RGB", (640, 480), c.window_bg))
+            preview_label.configure(image=placeholder)
+            preview_label.image = placeholder
+        except Exception:
+            pass
 
         status_label = tk.Label(frame, text="", font=f.body_f(),
                                 fg=c.text_muted, bg=c.surface)
@@ -1371,7 +1383,7 @@ Thank you to everyone who contributed ideas, feedback, and patience."""
                 from PIL import Image, ImageTk
                 import cv2
                 rgb = cv2.cvtColor(frame_data, cv2.COLOR_BGR2RGB)
-                img = Image.fromarray(rgb).resize((400, 300))
+                img = Image.fromarray(rgb).resize((640, 480))
                 photo = ImageTk.PhotoImage(img)
                 preview_label.configure(image=photo, text="")
                 preview_label.image = photo
