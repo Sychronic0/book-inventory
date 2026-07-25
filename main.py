@@ -1384,6 +1384,15 @@ Thank you to everyone who contributed ideas, feedback, and patience."""
             dlg.update_idletasks()
             self._lookup_and_close(isbn, dlg)
 
+        def on_blur(is_blurry: bool):
+            if not scanner_state["running"]:
+                return
+            if is_blurry:
+                status_label.configure(text="Image blurry — hold steady or move back a bit",
+                                        fg=c.text_muted)
+            else:
+                status_label.configure(text="Scanning… hold the barcode steady", fg=c.text_muted)
+
         def poll_loop():
             if scanner_state["running"] and scanner_state["scanner"]:
                 still_running = scanner_state["scanner"].poll()
@@ -1397,7 +1406,7 @@ Thank you to everyone who contributed ideas, feedback, and patience."""
                     fg=c.text_muted)
                 return
             scanner = BarcodeScanner()
-            ok = scanner.start(on_frame=on_frame, on_found=on_found)
+            ok = scanner.start(on_frame=on_frame, on_found=on_found, on_blur=on_blur)
             if not ok:
                 status_label.configure(text="Could not open webcam.", fg=c.text_muted)
                 return
