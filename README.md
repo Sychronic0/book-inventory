@@ -78,8 +78,10 @@ Results auto-fill the add form for review before saving.
 
 Webcam scanning requires extra packages (not needed for the EXE build):
 ```powershell
-pip install opencv-python pyzbar
+pip install opencv-python pyzbar zxing-cpp
 ```
+`zxing-cpp` is optional — a second decode engine tried alongside pyzbar for
+better real-world accuracy — everything still works without it.
 
 ---
 

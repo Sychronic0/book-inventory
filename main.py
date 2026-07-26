@@ -1368,7 +1368,15 @@ Thank you to everyone who contributed ideas, feedback, and patience."""
                                 fg=c.text_muted, bg=c.surface)
         status_label.pack(pady=(0,8))
 
-        scanner_state = {"scanner": None, "running": False}
+        focus_label = tk.Label(frame, text="", font=f.body_f(), bg=c.surface)
+        focus_label.pack(pady=(0,8))
+
+        scanner_state = {"scanner": None, "running": False, "blurry": True, "sharpness": 0.0}
+
+        # Matches BarcodeScanner.ROI_FRACTION — the box drawn on the preview
+        # must line up with the region the scanner actually measures/decodes,
+        # or the live focus readout wouldn't correspond to what's inside it.
+        ROI_FRACTION = 0.5
 
         def stop_scanner():
             if scanner_state["scanner"]:
@@ -1380,10 +1388,18 @@ Thank you to everyone who contributed ideas, feedback, and patience."""
             if not scanner_state["running"]:
                 return
             try:
-                from PIL import Image, ImageTk
+                from PIL import Image, ImageTk, ImageDraw
                 import cv2
                 rgb = cv2.cvtColor(frame_data, cv2.COLOR_BGR2RGB)
                 img = Image.fromarray(rgb).resize((640, 480))
+
+                margin = (1.0 - ROI_FRACTION) / 2.0
+                x0, x1 = int(640 * margin), int(640 * (1.0 - margin))
+                y0, y1 = int(480 * margin), int(480 * (1.0 - margin))
+                box_color = "#3ddc72" if not scanner_state["blurry"] else "#e05555"
+                draw = ImageDraw.Draw(img)
+                draw.rectangle([x0, y0, x1, y1], outline=box_color, width=3)
+
                 photo = ImageTk.PhotoImage(img)
                 preview_label.configure(image=photo, text="")
                 preview_label.image = photo
@@ -1393,17 +1409,23 @@ Thank you to everyone who contributed ideas, feedback, and patience."""
         def on_found(isbn: str):
             stop_scanner()
             status_label.configure(text=f"Found ISBN: {isbn} — looking up…", fg=c.accent)
+            focus_label.configure(text="")
             dlg.update_idletasks()
             self._lookup_and_close(isbn, dlg)
 
-        def on_blur(is_blurry: bool):
+        def on_blur(is_blurry: bool, sharpness: float):
             if not scanner_state["running"]:
                 return
+            scanner_state["blurry"] = is_blurry
+            scanner_state["sharpness"] = sharpness
             if is_blurry:
-                status_label.configure(text="Image blurry — hold steady or move back a bit",
+                status_label.configure(text="Hold the barcode inside the box, steady",
                                         fg=c.text_muted)
+                focus_label.configure(text=f"Focus: {sharpness:.0f} — too soft, adjust distance",
+                                       fg="#e05555")
             else:
-                status_label.configure(text="Scanning… hold the barcode steady", fg=c.text_muted)
+                status_label.configure(text="Looks good — hold steady", fg=c.text_muted)
+                focus_label.configure(text=f"Focus: {sharpness:.0f} — sharp", fg="#3ddc72")
 
         def poll_loop():
             if scanner_state["running"] and scanner_state["scanner"]:
@@ -1426,6 +1448,8 @@ Thank you to everyone who contributed ideas, feedback, and patience."""
                 return
             scanner_state["scanner"] = scanner
             scanner_state["running"] = True
+            scanner_state["blurry"] = True
+            scanner_state["sharpness"] = 0.0
             scan_btn.configure(state=tk.DISABLED)
             status_label.configure(text="Scanning… hold the barcode steady", fg=c.text_muted)
             poll_loop()
